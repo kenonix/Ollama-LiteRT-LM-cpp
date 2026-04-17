@@ -1,0 +1,25 @@
+cc_binary(
+    name = "multimodal_cli",
+    srcs = [
+        "main.cpp",
+        "utils.h",
+        "utils.cpp",
+        "config.h",
+        "config.cpp",
+        "llm_engine.h",
+        "llm_engine.cpp",
+        "tui_interface.h",
+        "tui_interface.cpp",
+        "server_mode.h",
+        "server_mode.cpp",
+        "httplib.h",
+        "json.hpp",
+    ],
+    linkopts = ["-lpthread"],
+    deps = [
+        "@litert_lm//c:engine",
+        "@ftxui//:component",
+        "@ftxui//:dom",
+        "@ftxui//:screen",
+    ],
+)
