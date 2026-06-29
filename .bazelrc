@@ -1,0 +1,2 @@
+build --experimental_repo_remote_exec
+build --per_file_copt=external/litert_lm/.*@-std=c++20

@@ -2,7 +2,6 @@
 
 workspace(name = "multimodal_cli")
 
-
 # UPDATED = 2026-04-01
 LITERT_REF = "9c46795ad4e2308bdecfc2c9a50a0d8f1bee2407"
 
@@ -17,7 +16,20 @@ TENSORFLOW_SHA256 = "772cf5d61c00d36cb17bc393beef57a2c9fc0643ff700777fcda825bcf1
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_jar")
 
 http_archive(
+    name = "rules_cc",
+    sha256 = "2037875b9a4456dce4a79d112a8ae101b7605e8de20f9a4915a1a1200ba7e43d",
+    strip_prefix = "rules_cc-0.0.9",
+    urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.0.9/rules_cc-0.0.9.tar.gz"],
+)
+
+http_archive(
     name = "litert_lm",
+    patch_cmds = [
+        "sed -i 's/absl::MutexLock lock(mutex_)/absl::MutexLock lock(\\&mutex_)/g' runtime/framework/threadpool.cc",
+        "sed -i 's/mutex_.unlock()/mutex_.Unlock()/g' runtime/framework/threadpool.cc",
+        "sed -i 's/mutex_.lock()/mutex_.Lock()/g' runtime/framework/threadpool.cc",
+        "sed -i 's/absl_nonnull//g' runtime/framework/*.h runtime/framework/*.cc",
+    ],
     strip_prefix = "LiteRT-LM-c7b77b579596966b60333fd393a1ff49026545ba",
     url = "https://github.com/google-ai-edge/LiteRT-LM/archive/c7b77b579596966b60333fd393a1ff49026545ba.tar.gz",
 )
@@ -335,7 +347,7 @@ crate_repositories()
 # https://bazelbuild.github.io/rules_rust/crate_universe_workspace.html#binary-dependencies.
 http_archive(
     name = "cxxbridge_cmd",
-    build_file = "@litert_lm//cxxbridge_cmd:BUILD.cxxbridge_cmd.bazel",
+    build_file = "//:BUILD.cxxbridge_cmd.bazel",
     integrity = "sha256-pf/3kWu94FwtuZRp8J3PryA78lsJbMv052GgR5JBLhA=",
     strip_prefix = "cxxbridge-cmd-1.0.149",
     type = "tar.gz",
@@ -384,6 +396,9 @@ http_archive(
     patch_cmds = [
         # Replace @//third_party with @litert//third_party in files under third_party/.
         "sed -i -e 's|\"@//third_party/|\"@litert//third_party/|g' third_party/*/*",
+        # Fix -Wchanges-meaning error in GCC 13+
+        "sed -i -e 's|ElementType ElementType() const|::litert::ElementType ElementType() const|g' litert/cc/litert_model_types.h",
+        "sed -i -e 's|Expected<RankedTensorType> RankedTensorType() const|Expected<::litert::RankedTensorType> RankedTensorType() const|g' litert/cc/litert_model_types.h",
     ],
     sha256 = LITERT_SHA256,
     strip_prefix = "LiteRT-" + LITERT_REF,
