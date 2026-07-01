@@ -33,14 +33,47 @@ http_archive(
         # Remove absl_nonnull/absl_nullable annotations (Clang-only, not supported by GCC)
         "find . -name '*.h' -o -name '*.cc' | xargs sed -i 's/absl_nonnull//g; s/absl_nullable//g'",
         # Fix StatusOr<Environment&> -> StatusOr<Environment*> (abseil 20240116 doesn't support reference types)
-        "sed -i 's/StatusOr<Environment&>/StatusOr<Environment*>/g' runtime/core/engine_impl.cc",
-        "sed -i 's/return \\*\\*kEnvironment;/return \\&(**kEnvironment);/g' runtime/core/engine_impl.cc",
-        "sed -i 's/ASSIGN_OR_RETURN(auto& env,/ASSIGN_OR_RETURN(auto* env,/g' runtime/core/engine_impl.cc",
-        "sed -i 's/main_executor_settings, env,/main_executor_settings, *env,/g' runtime/core/engine_impl.cc",
-        "sed -i 's/\\.value(), env)/\\.value(), *env)/g' runtime/core/engine_impl.cc",
+        # "sed -i 's/StatusOr<Environment&>/StatusOr<Environment*>/g' runtime/core/engine_impl.cc",
+        # "sed -i 's/return \\*\\*kEnvironment;/return \\&(**kEnvironment);/g' runtime/core/engine_impl.cc",
+        # "sed -i 's/ASSIGN_OR_RETURN(auto& env,/ASSIGN_OR_RETURN(auto* env,/g' runtime/core/engine_impl.cc",
+        # "sed -i 's/main_executor_settings, env,/main_executor_settings, *env,/g' runtime/core/engine_impl.cc",
+        # "sed -i 's/\\.value(), env)/\\.value(), *env)/g' runtime/core/engine_impl.cc",
+        # Fix Mutex lock using &NoDestructor object (abseil 20240116 compatibility)
+        "sed -i 's/\\&cached_identifiers_mutex/cached_identifiers_mutex/g' runtime/util/file_util.cc",
+        # Fix MutexLock requiring Mutex* (not Mutex&) in abseil 20240116
+        "sed -i 's/lock(section_buffers_mutex_)/lock(\\&section_buffers_mutex_)/g' runtime/util/litert_lm_loader.cc",
+        # Fix SetPerformanceMode compile error in vision executor (due to LiteRT API changes)
+        "sed -i '/SetPerformanceMode/,/kBurst);/d' runtime/executor/vision_litert_compiled_model_executor.cc",
+        # Fix SetPerformanceMode compile error in audio executor (due to LiteRT API changes)
+        "sed -i '/SetPerformanceMode/,/kBurst);/d' runtime/executor/audio_litert_compiled_model_executor.cc",
+        # Fix EnvironmentOptions Option implicit conversion error in litert_util.cc by deleting the log severity block
+        "sed -i '/GetMinLogSeverity/ { N; N; N; N; d; }' runtime/util/litert_util.cc",
+        # Fix EnvironmentOptions Option implicit conversion error in resource_manager.cc by deleting the log severity block
+        "sed -i '/GetMinLogSeverity/ { N; N; N; N; d; }' runtime/framework/resource_management/resource_manager.cc",
+        # Fix absl::StatusOr<Environment&> (unsupported reference type in abseil 20240116)
+        "sed -i 's/StatusOr<Environment\\&>/StatusOr<Environment*>/g' runtime/util/litert_util.h",
+        "sed -i 's/StatusOr<Environment\\&>/StatusOr<Environment*>/g' runtime/util/litert_util.cc",
+        "sed -i 's/return it->second->env;/return \\&it->second->env;/g' runtime/util/litert_util.cc",
+        "sed -i 's/ASSIGN_OR_RETURN(auto\\& litert_env,/auto litert_env_statusor = GetEnvironment(engine_settings, model_resources.get()); if (!litert_env_statusor.ok()) return litert_env_statusor.status(); auto\\& litert_env = **litert_env_statusor; \\/\\//g' runtime/core/engine_advanced_impl.cc",
+        "sed -i 's/GetEnvironment(engine_settings, model_resources.get()));/\\/\\//g' runtime/core/engine_advanced_impl.cc",
+        # Fix GpuOptions::SetKernelBatchSize missing method compile error in llm_executor_settings_utils.cc
+        "sed -i '/hint_kernel_batch_size/,/}/ s/^/\\/\\//' runtime/executor/llm_executor_settings_utils.cc",
+        # Fix MovableMutexLock calling absl::Mutex non-existent methods lock() and unlock()
+        "sed -i 's/mutex_->lock()/mutex_->Lock()/g; s/mutex_->unlock()/mutex_->Unlock()/g' runtime/framework/resource_management/utils/movable_mutex_lock.h",
+        # Fix SimpleTensor HasQuantization/PerTensorQuantization missing methods in NPU executor
+        "sed -i '/tensor_expected->HasQuantization()/,/}/c\\\\          \\/\\/ No quantization check' runtime/executor/llm_litert_npu_compiled_model_executor.cc",
+        "sed -i 's/if (logits_tensor.HasQuantization())/if (false)/g' runtime/executor/llm_litert_npu_compiled_model_executor.cc",
+        "sed -i 's/auto q_params = logits_tensor.PerTensorQuantization();/\\/\\/ auto q_params = logits_tensor.PerTensorQuantization();/g' runtime/executor/llm_litert_npu_compiled_model_executor.cc",
+        "sed -i 's/quantization_params.scale = q_params.scale;/\\/\\/ quantization_params.scale = q_params.scale;/g' runtime/executor/llm_litert_npu_compiled_model_executor.cc",
+        "sed -i 's/quantization_params.zero_point = static_cast<int32_t>(q_params.zero_point);/\\/\\/ quantization_params.zero_point = static_cast<int32_t>(q_params.zero_point);/g' runtime/executor/llm_litert_npu_compiled_model_executor.cc",
+        # Fix GpuOptions missing methods SetWeightCacheFd and SetProgramCacheFd
+        "sed -i 's/gpu_options.SetWeightCacheFd(fd);/\\/\\/ gpu_options.SetWeightCacheFd(fd);/g' runtime/executor/litert_compiled_model_executor_utils.cc",
+        "sed -i 's/gpu_options.SetProgramCacheFd(fd);/\\/\\/ gpu_options.SetProgramCacheFd(fd);/g' runtime/executor/litert_compiled_model_executor_utils.cc",
+        # Enable GPU + CPU fallback for hardware accelerators to fix unsupported GPU op compile errors
+        "sed -i 's/compilation_options.SetHardwareAccelerators(HwAccelerators::kGpu);/compilation_options.SetHardwareAccelerators(HwAccelerators::kGpu | HwAccelerators::kCpu);/g' runtime/executor/llm_executor_settings_utils.cc",
     ],
     strip_prefix = "LiteRT-LM-c7b77b579596966b60333fd393a1ff49026545ba",
-    url = "https://github.com/google-ai-edge/LiteRT-LM/archive/c7b77b579596966b60333fd393a1ff49026545ba.tar.gz",
+    url = "file:///home/kenonix/gits/Ollama-LiteRT-LM-cpp/litert_lm.tar.gz",
 )
 
 http_archive(

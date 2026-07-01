@@ -111,9 +111,13 @@ void MultimodalCliApp::RunInteractive() {
   }
 
   // 대화 세션 컨디그 생성
-  LiteRtLmConversationConfig *conv_config =
-      litert_lm_conversation_config_create(
-          engine_, session_config, sys_json.c_str(), nullptr, nullptr, false);
+  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
+  if (conv_config) {
+    if (session_config) {
+      litert_lm_conversation_config_set_session_config(conv_config, session_config);
+    }
+    litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
+  }
   if (session_config)
     litert_lm_session_config_delete(session_config);
 
@@ -156,7 +160,7 @@ void MultimodalCliApp::RunInteractive() {
     StreamContext ctx;
     // 스트리밍 방식으로 메시지 전송
     int stream_result = litert_lm_conversation_send_message_stream(
-        conversation, message_json.c_str(), nullptr, stream_callback, &ctx);
+        conversation, message_json.c_str(), nullptr, nullptr, stream_callback, &ctx);
 
     if (stream_result != 0) {
       std::cerr << "[오류] 스트리밍 시작 실패 (코드: " << stream_result << ")" << std::endl;
@@ -180,10 +184,13 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
 
   // 대화 기록을 포함하여 세션 구성
-  LiteRtLmConversationConfig *conv_config =
-      litert_lm_conversation_config_create(
-          engine_, nullptr, sys_json.c_str(), nullptr,
-          history_json.empty() ? nullptr : history_json.c_str(), false);
+  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
+  if (conv_config) {
+    litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
+    if (!history_json.empty()) {
+      litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
+    }
+  }
 
   LiteRtLmConversation *conversation =
       litert_lm_conversation_create(engine_, conv_config);
@@ -195,7 +202,7 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
   std::string out_text = "";
   // 동기식 메시지 전송
   LiteRtLmJsonResponse *response_obj = litert_lm_conversation_send_message(
-      conversation, current_msg.c_str(), nullptr);
+      conversation, current_msg.c_str(), nullptr, nullptr);
   if (response_obj) {
     const char *res_text = litert_lm_json_response_get_string(response_obj);
     if (res_text) {
@@ -230,10 +237,13 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
                                       std::function<void(const std::string &err)> error_cb) {
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
 
-  LiteRtLmConversationConfig *conv_config =
-      litert_lm_conversation_config_create(
-          engine_, nullptr, sys_json.c_str(), nullptr,
-          history_json.empty() ? nullptr : history_json.c_str(), false);
+  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
+  if (conv_config) {
+    litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
+    if (!history_json.empty()) {
+      litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
+    }
+  }
 
   LiteRtLmConversation *conversation =
       litert_lm_conversation_create(engine_, conv_config);
@@ -280,7 +290,7 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
 
   // 비동기 스트리밍 시작
   int result = litert_lm_conversation_send_message_stream(
-      conversation, current_msg.c_str(), nullptr, callback, ctx.get());
+      conversation, current_msg.c_str(), nullptr, nullptr, callback, ctx.get());
 
   if (result != 0) {
     error_cb("스트리밍 시작 실패 (코드: " + std::to_string(result) + ")");

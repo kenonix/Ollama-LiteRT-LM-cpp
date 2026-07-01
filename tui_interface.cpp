@@ -74,8 +74,10 @@ void tui_init_conversation(AppState &state) {
   }
   // 시스템 메시지 포함하여 컨피그 생성
   std::string sys_json = json({{"role", "system"}, {"content", state.system_prompt}}).dump();
-  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create(
-      state.engine, nullptr, sys_json.c_str(), nullptr, nullptr, false);
+  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
+  if (conv_config) {
+    litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
+  }
   state.conversation = litert_lm_conversation_create(state.engine, conv_config);
   if (conv_config) litert_lm_conversation_config_delete(conv_config);
 }
@@ -145,7 +147,7 @@ void send_message_async(AppState &state, const std::string &user_text,
 
     // 엔진에 메시지 전송 (스트리밍 방식)
     int result = litert_lm_conversation_send_message_stream(
-        state.conversation, message_json.c_str(), config_json.c_str(), callback, ctx.get());
+        state.conversation, message_json.c_str(), config_json.c_str(), nullptr, callback, ctx.get());
 
     if (result != 0) {
       // 시작 실패 시 처리
