@@ -1,0 +1,10 @@
+# Model files
+*.litertlm
+*.xnnpack_cache
+
+# Bazel
+bazel-*
+/build/
+
+# OS
+.DS_Store
