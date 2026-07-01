@@ -42,7 +42,7 @@ private:
 
 public:
   // 생성자: 모델 경로와 시스템 프롬프트를 사용하여 엔진 초기화
-  MultimodalCliApp(const std::string &model_path, const std::string &system_prompt = "");
+  MultimodalCliApp(const std::string &model_path, const std::string &system_prompt = "", bool use_gpu = false);
   // 소멸자: 엔진 자원 해제
   ~MultimodalCliApp();
 

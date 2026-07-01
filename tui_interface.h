@@ -78,4 +78,4 @@ Element render_message(const ChatMessage &msg, int spinner_frame);
 /**
  * @brief TUI 환경을 초기화하고 메인 루프를 실행합니다.
  */
-void RunTUI(const std::string &model_path);
+void RunTUI(const std::string &model_path, bool use_gpu = false);

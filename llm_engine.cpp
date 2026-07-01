@@ -62,7 +62,7 @@ void stream_callback(void *callback_data, const char *chunk, bool is_final, cons
 }
 
 // MultimodalCliApp 생성자: 엔진 설정 및 인스턴스 생성
-MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt)
+MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt, bool use_gpu)
     : system_prompt_(system_prompt) {
   // 시스템 프롬프트가 제공되지 않은 경우 파일에서 로드 시도
   if (system_prompt_.empty()) {
@@ -77,9 +77,10 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   }
 
   std::cout << "[시스템] 모델 로딩 중..." << std::endl;
-  // 엔진 설정 생성 (CPU 사용 설정)
+  // 엔진 설정 생성 (GPU/CPU 분기 설정)
+  const char* backend = use_gpu ? "gpu" : "cpu";
   LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
-      model_path.c_str(), "cpu", "cpu", nullptr);
+      model_path.c_str(), backend, backend, nullptr);
   if (!settings)
     throw std::runtime_error("엔진 설정 생성 실패");
 

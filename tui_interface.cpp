@@ -226,10 +226,11 @@ Element render_message(const ChatMessage &msg, int spinner_frame) {
 }
 
 // TUI 메인 실행 함수
-void RunTUI(const std::string &model_path) {
+void RunTUI(const std::string &model_path, bool use_gpu) {
   AppState state;
   // 엔진 설정 및 생성
-  LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(model_path.c_str(), "cpu", "cpu", nullptr);
+  const char* backend = use_gpu ? "gpu" : "cpu";
+  LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(model_path.c_str(), backend, backend, nullptr);
   if (!settings) return;
   state.engine = litert_lm_engine_create(settings);
   litert_lm_engine_settings_delete(settings);
