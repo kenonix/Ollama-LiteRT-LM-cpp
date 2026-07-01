@@ -25,10 +25,19 @@ http_archive(
 http_archive(
     name = "litert_lm",
     patch_cmds = [
-        "sed -i 's/absl::MutexLock lock(mutex_)/absl::MutexLock lock(\\&mutex_)/g' runtime/framework/threadpool.cc",
+        # Fix absl::MutexLock requiring pointer (not reference) in abseil 20240116 - all .cc files
+        "find . -name '*.cc' -exec sed -i -E 's/absl::MutexLock ([a-z_]+)\\(([^&])/absl::MutexLock \\1(\\&\\2/g' {} +",
+        # Fix mutex_.lock()/unlock() -> mutex_.Lock()/Unlock() for abseil 20240116
         "sed -i 's/mutex_.unlock()/mutex_.Unlock()/g' runtime/framework/threadpool.cc",
         "sed -i 's/mutex_.lock()/mutex_.Lock()/g' runtime/framework/threadpool.cc",
-        "sed -i 's/absl_nonnull//g' runtime/framework/*.h runtime/framework/*.cc",
+        # Remove absl_nonnull/absl_nullable annotations (Clang-only, not supported by GCC)
+        "find . -name '*.h' -o -name '*.cc' | xargs sed -i 's/absl_nonnull//g; s/absl_nullable//g'",
+        # Fix StatusOr<Environment&> -> StatusOr<Environment*> (abseil 20240116 doesn't support reference types)
+        "sed -i 's/StatusOr<Environment&>/StatusOr<Environment*>/g' runtime/core/engine_impl.cc",
+        "sed -i 's/return \\*\\*kEnvironment;/return \\&(**kEnvironment);/g' runtime/core/engine_impl.cc",
+        "sed -i 's/ASSIGN_OR_RETURN(auto& env,/ASSIGN_OR_RETURN(auto* env,/g' runtime/core/engine_impl.cc",
+        "sed -i 's/main_executor_settings, env,/main_executor_settings, *env,/g' runtime/core/engine_impl.cc",
+        "sed -i 's/\\.value(), env)/\\.value(), *env)/g' runtime/core/engine_impl.cc",
     ],
     strip_prefix = "LiteRT-LM-c7b77b579596966b60333fd393a1ff49026545ba",
     url = "https://github.com/google-ai-edge/LiteRT-LM/archive/c7b77b579596966b60333fd393a1ff49026545ba.tar.gz",
@@ -399,6 +408,8 @@ http_archive(
         # Fix -Wchanges-meaning error in GCC 13+
         "sed -i -e 's|ElementType ElementType() const|::litert::ElementType ElementType() const|g' litert/cc/litert_model_types.h",
         "sed -i -e 's|Expected<RankedTensorType> RankedTensorType() const|Expected<::litert::RankedTensorType> RankedTensorType() const|g' litert/cc/litert_model_types.h",
+        # Fix absl::MutexLock requiring pointer (not reference) in abseil 20240116
+        "find litert/ -name '*.cc' -exec sed -i -E 's/absl::MutexLock ([a-z_]+)\\(([^&])/absl::MutexLock \\1(\\&\\2/g' {} +",
     ],
     sha256 = LITERT_SHA256,
     strip_prefix = "LiteRT-" + LITERT_REF,
