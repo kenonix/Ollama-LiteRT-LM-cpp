@@ -259,7 +259,7 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
           weight_cache_file, program_cache_file, cache_key,
           /*logging_prefix=*/VisionExecutorSettings::kEncoderName,
           /*cache_compiled_shaders_only=*/false, gpu_options));
-      options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
+      options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);
       break;
     }
 #if !defined(LITERT_DISABLE_NPU)
@@ -349,6 +349,7 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionAdapter::Initialize() {
                        "_", metadata_id),
           /*logging_prefix=*/VisionExecutorSettings::kAdapterName,
           /*cache_compiled_shaders_only=*/false, gpu_options));
+      options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);
 
       break;
     }

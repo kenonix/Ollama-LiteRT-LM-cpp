@@ -265,7 +265,7 @@ AudioLiteRtCompiledModelExecutor::AudioStaticEncoder::Initialize() {
                      "_", metadata_id),
         /*logging_prefix=*/AudioExecutorSettings::kStaticEncoderName,
         /*cache_compiled_shaders_only=*/false, gpu_options));
-    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);
   } else if (executor_settings_.GetBackend() == Backend::CPU) {
     LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
     RETURN_IF_ERROR(SetCpuOptions(executor_settings_, cpu_options));
@@ -408,7 +408,7 @@ AudioLiteRtCompiledModelExecutor::AudioStreamingEncoder::Initialize() {
                      metadata_id),
         /*logging_prefix=*/AudioExecutorSettings::kStreamingEncoderName,
         /*cache_compiled_shaders_only=*/false, gpu_options));
-    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);
   } else if (executor_settings_.GetBackend() == Backend::CPU) {
     LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
     RETURN_IF_ERROR(SetCpuOptions(executor_settings_, cpu_options));
@@ -619,7 +619,7 @@ absl::Status AudioLiteRtCompiledModelExecutor::AudioAdapter::Initialize() {
 #if defined(LITERT_USE_WEBGPU_ACCELERATOR)
     gpu_options.SetBackend(GpuOptions::Backend::kWebGpu);
 #endif  // defined(LITERT_USE_WEBGPU_ACCELERATOR)
-    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);
   } else if (executor_settings_.GetBackend() == Backend::CPU) {
     LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
     RETURN_IF_ERROR(SetCpuOptions(executor_settings_, cpu_options));

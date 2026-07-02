@@ -71,6 +71,10 @@ http_archive(
         "sed -i 's/gpu_options.SetProgramCacheFd(fd);/\\/\\/ gpu_options.SetProgramCacheFd(fd);/g' runtime/executor/litert_compiled_model_executor_utils.cc",
         # Enable GPU + CPU fallback for hardware accelerators to fix unsupported GPU op compile errors
         "sed -i 's/compilation_options.SetHardwareAccelerators(HwAccelerators::kGpu);/compilation_options.SetHardwareAccelerators(HwAccelerators::kGpu | HwAccelerators::kCpu);/g' runtime/executor/llm_executor_settings_utils.cc",
+        # Enable GPU + CPU fallback for hardware accelerators in audio executor
+        "python3 -c \"with open('runtime/executor/audio_litert_compiled_model_executor.cc', 'r') as f: c = f.read(); c = c.replace('options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);', 'options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);'); open('runtime/executor/audio_litert_compiled_model_executor.cc', 'w').write(c)\"",
+        # Enable GPU + CPU fallback for hardware accelerators in vision executor
+        "python3 -c \"with open('runtime/executor/vision_litert_compiled_model_executor.cc', 'r') as f: c = f.read(); c = c.replace('options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);', 'options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);'); c = c.replace('VisionExecutorSettings::kAdapterName,\\\\n          /*cache_compiled_shaders_only=*/false, gpu_options));', 'VisionExecutorSettings::kAdapterName,\\\\n          /*cache_compiled_shaders_only=*/false, gpu_options));\\\\n      options.SetHardwareAccelerators(litert::HwAccelerators::kGpu | litert::HwAccelerators::kCpu);'); open('runtime/executor/vision_litert_compiled_model_executor.cc', 'w').write(c)\"",
     ],
     strip_prefix = "LiteRT-LM-c7b77b579596966b60333fd393a1ff49026545ba",
     url = "file:///home/kenonix/gits/Ollama-LiteRT-LM-cpp/litert_lm.tar.gz",
