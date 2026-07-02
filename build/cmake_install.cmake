@@ -1,4 +1,4 @@
-# Install script for directory: /home/kenonix/gits/cpp
+# Install script for directory: /home/kenonix/gits/Ollama-LiteRT-LM-cpp
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -45,7 +45,7 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/kenonix/gits/cpp/build/install_local_manifest.txt"
+  file(WRITE "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -61,6 +61,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/kenonix/gits/cpp/build/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

@@ -1,3 +1,3 @@
-/home/kenonix/gits/cpp/build/CMakeFiles/multimodal_cli.dir
-/home/kenonix/gits/cpp/build/CMakeFiles/edit_cache.dir
-/home/kenonix/gits/cpp/build/CMakeFiles/rebuild_cache.dir
+/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/multimodal_cli.dir
+/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/edit_cache.dir
+/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/rebuild_cache.dir

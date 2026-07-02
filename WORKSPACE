@@ -441,6 +441,9 @@ http_archive(
         # Fix -Wchanges-meaning error in GCC 13+
         "sed -i -e 's|ElementType ElementType() const|::litert::ElementType ElementType() const|g' litert/cc/litert_model_types.h",
         "sed -i -e 's|Expected<RankedTensorType> RankedTensorType() const|Expected<::litert::RankedTensorType> RankedTensorType() const|g' litert/cc/litert_model_types.h",
+        # Fix -Wchanges-meaning error in litert_extended_model.h for GCC 13+
+        "sed -i -e 's|Weights Weights() const|::litert::Weights Weights() const|g' litert/cc/internal/litert_extended_model.h",
+        "sed -i -e 's|Expected<Subgraph> Subgraph(size_t|Expected<class Subgraph> Subgraph(size_t|g' litert/cc/internal/litert_extended_model.h",
         # Fix absl::MutexLock requiring pointer (not reference) in abseil 20240116
         "find litert/ -name '*.cc' -exec sed -i -E 's/absl::MutexLock ([a-z_]+)\\(([^&])/absl::MutexLock \\1(\\&\\2/g' {} +",
     ],
