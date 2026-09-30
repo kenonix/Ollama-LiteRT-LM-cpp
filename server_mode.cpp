@@ -83,6 +83,40 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
   return transformed;
 }
 
+// 시스템 프롬프트를 사용자 메시지 앞단에 자연스럽게 병합 (Gemma/LiteRT-LM의 미지원 시스템 토큰 호환)
+static void prepend_system_prompt_to_message(json &msg, const std::string &sys_prompt) {
+  if (sys_prompt.empty()) return;
+  if (msg.contains("content")) {
+    if (msg["content"].is_string()) {
+      std::string original = msg["content"].get<std::string>();
+      if (original.empty()) {
+        msg["content"] = sys_prompt;
+      } else {
+        msg["content"] = sys_prompt + "\n\n" + original;
+      }
+    } else if (msg["content"].is_array()) {
+      bool prepended = false;
+      for (auto &part : msg["content"]) {
+        if (part.is_object() && part.value("type", "") == "text") {
+          std::string original = part.value("text", "");
+          if (original.empty()) {
+            part["text"] = sys_prompt;
+          } else {
+            part["text"] = sys_prompt + "\n\n" + original;
+          }
+          prepended = true;
+          break;
+        }
+      }
+      if (!prepended) {
+        msg["content"].insert(msg["content"].begin(), {{"type", "text"}, {"text", sys_prompt}});
+      }
+    }
+  } else {
+    msg["content"] = sys_prompt;
+  }
+}
+
 // API 서버 실행부 구현
 void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name) {
   httplib::Server svr;
@@ -144,7 +178,7 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       auto j_req = json::parse(req.body);
       // Ollama 스펙상 stream 생략 시 기본값은 true, OpenAI는 false
       bool want_stream = j_req.contains("stream") ? j_req["stream"].get<bool>() : is_ollama;
-      std::string sys_msg = DEFAULT_SYSTEM_PROMPT;
+      std::string sys_msg = "";
       json history_arr = json::array();
       json current_msg_j;
 
@@ -153,20 +187,46 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       // 메시지 파싱 및 대화 기록/시스템 메시지 분리
       if (j_req.contains("messages") && j_req["messages"].is_array()) {
         auto messages = j_req["messages"];
-        if (!messages.empty()) {
-          for (size_t i = 0; i < messages.size() - 1; ++i) {
-            if (messages[i].value("role", "") == "system") {
-              sys_msg = messages[i].value("content", DEFAULT_SYSTEM_PROMPT);
-            } else {
-              history_arr.push_back(transform_message_for_litert(messages[i], temp_files));
+        for (const auto &m : messages) {
+          if (!m.is_object()) continue;
+          std::string role = m.value("role", "");
+          if (role == "system") {
+            std::string content = m.value("content", "");
+            if (!content.empty()) {
+              if (!sys_msg.empty()) sys_msg += "\n\n";
+              sys_msg += content;
             }
+          } else {
+            history_arr.push_back(transform_message_for_litert(m, temp_files));
           }
-          current_msg_j = transform_message_for_litert(messages.back(), temp_files);
         }
       }
 
-      if (current_msg_j.is_null() || current_msg_j.empty()) {
+      if (sys_msg.empty()) {
+        sys_msg = DEFAULT_SYSTEM_PROMPT;
+      }
+
+      if (!history_arr.empty()) {
+        current_msg_j = history_arr.back();
+        history_arr.erase(history_arr.end() - 1);
+      } else {
         current_msg_j = {{"role", "user"}, {"content", ""}};
+      }
+
+      // LiteRT-LM / Gemma 엔진은 내부 템플릿에 system 토큰이 없으므로,
+      // 첫 번째 user 메시지 앞단에 시스템 프롬프트를 자동으로 병합하여 100% 지침 준수 보장
+      if (!sys_msg.empty()) {
+        bool injected = false;
+        for (auto &m : history_arr) {
+          if (m.value("role", "") == "user") {
+            prepend_system_prompt_to_message(m, sys_msg);
+            injected = true;
+            break;
+          }
+        }
+        if (!injected) {
+          prepend_system_prompt_to_message(current_msg_j, sys_msg);
+        }
       }
 
       std::string history_json_str = history_arr.empty() ? "" : history_arr.dump();
@@ -289,6 +349,11 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       std::string prompt = j_req.value("prompt", "");
       std::string sys_msg = j_req.value("system", DEFAULT_SYSTEM_PROMPT);
 
+      std::string effective_prompt = prompt;
+      if (!sys_msg.empty()) {
+        effective_prompt = sys_msg + "\n\n" + prompt;
+      }
+
       auto temp_files = std::make_shared<TempFilesCleanup>();
       json current_msg_j;
 
@@ -304,12 +369,12 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
             }
           }
         }
-        if (!prompt.empty()) {
-          content_arr.push_back({{"type", "text"}, {"text", prompt}});
+        if (!effective_prompt.empty()) {
+          content_arr.push_back({{"type", "text"}, {"text", effective_prompt}});
         }
         current_msg_j = {{"role", "user"}, {"content", content_arr}};
       } else {
-        current_msg_j = {{"role", "user"}, {"content", prompt}};
+        current_msg_j = {{"role", "user"}, {"content", effective_prompt}};
       }
 
       std::string current_msg_str = current_msg_j.dump();
