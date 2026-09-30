@@ -1,6 +1,12 @@
-# Model files
+# Model and Cache files
 *.litertlm
+*.bin
 *.xnnpack_cache*
+*_cache*
+
+# Python
+__pycache__/
+*.pyc
 
 # Bazel
 bazel-*
