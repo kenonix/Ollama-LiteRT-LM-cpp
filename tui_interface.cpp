@@ -71,13 +71,35 @@ void save_settings(AppState &state) {
 void tui_init_conversation(AppState &state) {
   if (state.conversation) {
     litert_lm_conversation_delete(state.conversation);
+    state.conversation = nullptr;
   }
   // 시스템 메시지 포함하여 컨피그 생성
   std::string sys_json = json({{"role", "system"}, {"content", state.system_prompt}}).dump();
+
+  LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
+  if (session_config) {
+    litert_lm_session_config_set_max_output_tokens(session_config, state.config.max_tokens);
+    LiteRtLmSamplerParams *sampler_params = litert_lm_sampler_params_create(kLiteRtLmSamplerTypeTopP);
+    if (sampler_params) {
+      litert_lm_sampler_params_set_temperature(sampler_params, state.config.temperature);
+      litert_lm_sampler_params_set_top_p(sampler_params, state.config.top_p);
+      litert_lm_sampler_params_set_top_k(sampler_params, state.config.top_k);
+      litert_lm_session_config_set_sampler_params(session_config, sampler_params);
+      litert_lm_sampler_params_delete(sampler_params);
+    }
+  }
+
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
   if (conv_config) {
+    if (session_config) {
+      litert_lm_conversation_config_set_session_config(conv_config, session_config);
+    }
     litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
   }
+  if (session_config) {
+    litert_lm_session_config_delete(session_config);
+  }
+
   state.conversation = litert_lm_conversation_create(state.engine, conv_config);
   if (conv_config) litert_lm_conversation_config_delete(conv_config);
 }
@@ -120,9 +142,11 @@ void send_message_async(AppState &state, const std::string &user_text,
     auto ctx = std::make_shared<StreamCtx>();
 
     // 스트리밍 콜백 람다
-    auto callback = [](void *data, const char *chunk, bool is_final, const char *error_msg) {
+    auto callback = [](void *data, const LiteRtLmStreamChunk *chunk) {
       auto *c = static_cast<StreamCtx *>(data);
+      if (!chunk) return;
       std::lock_guard<std::mutex> lock(c->mtx);
+      const char *error_msg = litert_lm_stream_chunk_get_error(chunk);
       if (error_msg) {
         c->has_error = true;
         c->error_msg = error_msg;
@@ -130,24 +154,18 @@ void send_message_async(AppState &state, const std::string &user_text,
         c->cv.notify_one();
         return;
       }
-      if (chunk) {
-        std::string text = extract_text_from_chunk(chunk);
+      const char *raw_chunk = litert_lm_stream_chunk_get_text(chunk);
+      if (raw_chunk) {
+        std::string text = extract_text_from_chunk(raw_chunk);
         if (!text.empty()) c->chunks.push(std::move(text));
       }
-      if (is_final) c->done = true;
+      if (litert_lm_stream_chunk_is_final(chunk)) c->done = true;
       c->cv.notify_one();
     };
 
-    // 현재 설정 로드
-    std::string config_json;
-    {
-      std::lock_guard<std::mutex> lock(state.mtx);
-      config_json = state.config.to_json().dump();
-    }
-
     // 엔진에 메시지 전송 (스트리밍 방식)
     int result = litert_lm_conversation_send_message_stream(
-        state.conversation, message_json.c_str(), config_json.c_str(), nullptr, callback, ctx.get());
+        state.conversation, message_json.c_str(), nullptr, nullptr, callback, ctx.get());
 
     if (result != 0) {
       // 시작 실패 시 처리
@@ -228,18 +246,30 @@ Element render_message(const ChatMessage &msg, int spinner_frame) {
 }
 
 // TUI 메인 실행 함수
-void RunTUI(const std::string &model_path, bool use_gpu) {
+void RunTUI(const std::string &model_path, bool use_gpu, int max_tokens) {
   AppState state;
+  // 설정 로드 먼저 수행하여 state.config 값 확인
+  load_settings(state);
+  if (max_tokens > 0) {
+    state.config.max_tokens = max_tokens;
+    state.ui_max_tokens_buf = std::to_string(max_tokens);
+  }
+
   // 엔진 설정 및 생성
   const char* backend = use_gpu ? "gpu" : "cpu";
   LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(model_path.c_str(), backend, backend, nullptr);
   if (!settings) return;
+
+  // RAM 과도 사용 방지 최적화
+  litert_lm_engine_settings_set_max_num_tokens(settings, state.config.max_tokens);
+  litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
+  litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
+  litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, "./lib");
+
   state.engine = litert_lm_engine_create(settings);
   litert_lm_engine_settings_delete(settings);
   if (!state.engine) return;
 
-  // 설정 로드 및 세션 초기화
-  load_settings(state);
   tui_init_conversation(state);
   if (!state.conversation) return;
 
@@ -380,7 +410,7 @@ void RunTUI(const std::string &model_path, bool use_gpu) {
   });
 
   // 로그 레벨 조절 및 루프 시작
-  litert_lm_set_min_log_level(1); // WARNING 레벨 이상만 표시
+  litert_lm_set_min_log_level(kLiteRtLmLogSeverityWarning); // WARNING 레벨 이상만 표시
   screen.Loop(component);
   
   // 종료 처리

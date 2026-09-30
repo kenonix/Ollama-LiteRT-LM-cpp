@@ -1,6 +1,6 @@
 # Model files
 *.litertlm
-*.xnnpack_cache
+*.xnnpack_cache*
 
 # Bazel
 bazel-*

@@ -4,13 +4,24 @@ project(LiteRT_LM_Multimodal_CLI VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# LiteRT-LM 경로 설정
-set(LITERT_LM_ROOT "${CMAKE_SOURCE_DIR}/LiteRT-LM")
-include_directories(${LITERT_LM_ROOT}) # 'c/engine.h'를 찾기 위한 루트 경로
+# 헤더 경로
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}
+)
 
-# 라이브러리 경로 (Linux x86_64 prebuilt)
-set(LITERT_LIB_DIR "${LITERT_LM_ROOT}/prebuilt/linux_x86_64")
+# 라이브러리 경로
+set(LITERT_LIB_DIR "${CMAKE_SOURCE_DIR}/lib")
 link_directories(${LITERT_LIB_DIR})
+
+# FTXUI 가져오기
+include(FetchContent)
+FetchContent_Declare(
+    ftxui
+    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
+    GIT_TAG v6.1.9
+)
+FetchContent_MakeAvailable(ftxui)
 
 add_executable(multimodal_cli 
     main.cpp
@@ -21,10 +32,17 @@ add_executable(multimodal_cli
     server_mode.cpp
 )
 
-# 의존성 링크: libLiteRt.so 하나만 링크하면 됩니다.
+set_target_properties(multimodal_cli PROPERTIES
+    BUILD_RPATH "${LITERT_LIB_DIR};$ORIGIN/lib"
+    INSTALL_RPATH "${LITERT_LIB_DIR};$ORIGIN/lib"
+)
+
 target_link_libraries(multimodal_cli
     PRIVATE
-    LiteRt    # libLiteRt.so 를 의미함
+    litert-lm
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
     pthread
     dl
 )

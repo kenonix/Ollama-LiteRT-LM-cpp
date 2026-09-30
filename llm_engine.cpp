@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <queue>
+#include <chrono>
 
 // 엔진 응답 JSON에서 텍스트를 파싱하여 추출
 std::string extract_text_from_chunk(const char *chunk) {
@@ -31,10 +32,11 @@ std::string extract_text_from_chunk(const char *chunk) {
 }
 
 // 스트리밍 데이터를 가로채서 화면에 출력하고 완료 시 시그널링
-void stream_callback(void *callback_data, const char *chunk, bool is_final, const char *error_msg) {
+void stream_callback(void *callback_data, const LiteRtLmStreamChunk *chunk) {
   auto *ctx = static_cast<StreamContext *>(callback_data);
+  if (!chunk) return;
 
-  // 오류 발생 시 처리
+  const char *error_msg = litert_lm_stream_chunk_get_error(chunk);
   if (error_msg) {
     std::cerr << "\n[스트리밍 오류] " << error_msg << std::endl;
     std::lock_guard<std::mutex> lock(ctx->mtx);
@@ -45,16 +47,15 @@ void stream_callback(void *callback_data, const char *chunk, bool is_final, cons
     return;
   }
 
-  // 텍스트 청크 출력
-  if (chunk) {
-    std::string text = extract_text_from_chunk(chunk);
+  const char *raw_chunk = litert_lm_stream_chunk_get_text(chunk);
+  if (raw_chunk) {
+    std::string text = extract_text_from_chunk(raw_chunk);
     if (!text.empty()) {
       std::cout << text << std::flush;
     }
   }
 
-  // 최종 응답 수신 시 완료 알림
-  if (is_final) {
+  if (litert_lm_stream_chunk_is_final(chunk)) {
     std::lock_guard<std::mutex> lock(ctx->mtx);
     ctx->done = true;
     ctx->cv.notify_one();
@@ -62,8 +63,8 @@ void stream_callback(void *callback_data, const char *chunk, bool is_final, cons
 }
 
 // MultimodalCliApp 생성자: 엔진 설정 및 인스턴스 생성
-MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt, bool use_gpu)
-    : system_prompt_(system_prompt) {
+MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt, bool use_gpu, int max_tokens)
+    : system_prompt_(system_prompt), max_tokens_(max_tokens) {
   // 시스템 프롬프트가 제공되지 않은 경우 파일에서 로드 시도
   if (system_prompt_.empty()) {
     std::ifstream pfile(PROMPT_FILE);
@@ -76,13 +77,20 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
       system_prompt_ = DEFAULT_SYSTEM_PROMPT;
   }
 
-  std::cout << "[시스템] 모델 로딩 중..." << std::endl;
+  std::cout << "[시스템] 모델 로딩 중 (" << (use_gpu ? "GPU 가속" : "CPU") 
+            << ", Max Tokens: " << max_tokens_ << ")..." << std::endl;
   // 엔진 설정 생성 (GPU/CPU 분기 설정)
   const char* backend = use_gpu ? "gpu" : "cpu";
   LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
       model_path.c_str(), backend, backend, nullptr);
   if (!settings)
     throw std::runtime_error("엔진 설정 생성 실패");
+
+  // RAM 과도 사용 방지 최적화
+  litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens_);
+  litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
+  litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
+  litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, "./lib");
 
   // 엔진 인스턴스 생성
   engine_ = litert_lm_engine_create(settings);
@@ -95,22 +103,23 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
 
 // 소멸자: LiteRT-LM 엔진 자원 해제
 MultimodalCliApp::~MultimodalCliApp() {
-  if (engine_)
+  std::lock_guard<std::mutex> lock(engine_mutex_);
+  if (engine_) {
     litert_lm_engine_delete(engine_);
+    engine_ = nullptr;
+  }
 }
 
 // CLI 상호작용 루프 실행
 void MultimodalCliApp::RunInteractive() {
-  // 시스템 프롬프트를 포함한 대화 설정 구성
   std::string sys_json = json({{"role", "system"}, {"content", system_prompt_}}).dump();
 
   LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
   if (session_config) {
-    // 최대 출력 토큰 설정
-    litert_lm_session_config_set_max_output_tokens(session_config, 8192);
+    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
   }
 
-  // 대화 세션 컨디그 생성
+  // 대화 세션 설정 생성
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
   if (conv_config) {
     if (session_config) {
@@ -158,7 +167,6 @@ void MultimodalCliApp::RunInteractive() {
 
     std::cout << "\n";
     StreamContext ctx;
-    // 스트리밍 방식으로 메시지 전송
     int stream_result = litert_lm_conversation_send_message_stream(
         conversation, message_json.c_str(), nullptr, nullptr, stream_callback, &ctx);
 
@@ -181,16 +189,28 @@ void MultimodalCliApp::RunInteractive() {
 std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_str,
                                                 const std::string &history_json,
                                                 const std::string &current_msg) {
+  std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
+
+  LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
+  if (session_config) {
+    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
+  }
 
   // 대화 기록을 포함하여 세션 구성
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
   if (conv_config) {
+    if (session_config) {
+      litert_lm_conversation_config_set_session_config(conv_config, session_config);
+    }
     litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
     if (!history_json.empty()) {
       litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
     }
   }
+  if (session_config)
+    litert_lm_session_config_delete(session_config);
 
   LiteRtLmConversation *conversation =
       litert_lm_conversation_create(engine_, conv_config);
@@ -208,7 +228,6 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
     if (res_text) {
       try {
         auto res_j = json::parse(res_text);
-        // 응답 JSON에서 content 추출
         if (res_j.contains("content")) {
           if (res_j["content"].is_string()) {
             out_text = res_j["content"].get<std::string>();
@@ -234,16 +253,29 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
                                       const std::string &current_msg,
                                       std::function<void(const std::string &chunk)> chunk_cb,
                                       std::function<void()> done_cb,
-                                      std::function<void(const std::string &err)> error_cb) {
+                                      std::function<void(const std::string &err)> error_cb,
+                                      std::function<bool()> is_cancelled) {
+  std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
+
+  LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
+  if (session_config) {
+    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
+  }
 
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
   if (conv_config) {
+    if (session_config) {
+      litert_lm_conversation_config_set_session_config(conv_config, session_config);
+    }
     litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
     if (!history_json.empty()) {
       litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
     }
   }
+  if (session_config)
+    litert_lm_session_config_delete(session_config);
 
   LiteRtLmConversation *conversation =
       litert_lm_conversation_create(engine_, conv_config);
@@ -258,17 +290,18 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
   struct ServerStreamCtx {
     std::mutex mtx;
     std::condition_variable cv;
-    std::queue<std::string> chunks; // 큐를 이용해 순차적 데이터 전달
+    std::queue<std::string> chunks;
     bool done = false;
     bool has_error = false;
     std::string error_msg;
   };
   auto ctx = std::make_shared<ServerStreamCtx>();
 
-  // 내부 콜백: 수신된 데이터를 큐에 저장
-  auto callback = [](void *data, const char *chunk, bool is_final, const char *error_msg) {
+  auto callback = [](void *data, const LiteRtLmStreamChunk *chunk) {
     auto *c = static_cast<ServerStreamCtx *>(data);
+    if (!chunk) return;
     std::lock_guard<std::mutex> lock(c->mtx);
+    const char *error_msg = litert_lm_stream_chunk_get_error(chunk);
     if (error_msg) {
       c->has_error = true;
       c->error_msg = error_msg;
@@ -276,19 +309,19 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
       c->cv.notify_one();
       return;
     }
-    if (chunk) {
-      std::string text = extract_text_from_chunk(chunk);
+    const char *raw_chunk = litert_lm_stream_chunk_get_text(chunk);
+    if (raw_chunk) {
+      std::string text = extract_text_from_chunk(raw_chunk);
       if (!text.empty()) {
         c->chunks.push(std::move(text));
       }
     }
-    if (is_final) {
+    if (litert_lm_stream_chunk_is_final(chunk)) {
       c->done = true;
     }
     c->cv.notify_one();
   };
 
-  // 비동기 스트리밍 시작
   int result = litert_lm_conversation_send_message_stream(
       conversation, current_msg.c_str(), nullptr, nullptr, callback, ctx.get());
 
@@ -298,24 +331,33 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
     return;
   }
 
-  // 큐 소비 루프: 데이터를 수신하는 대로 외부 콜백(chunk_cb) 호출
+  // 큐 소비 루프: 데이터를 수신하는 대로 외부 콜백 호출, 취소 감지 시 cancel_process 호출
   while (true) {
+    if (is_cancelled && is_cancelled()) {
+      litert_lm_conversation_cancel_process(conversation);
+      break;
+    }
+
     std::unique_lock<std::mutex> lock(ctx->mtx);
-    // 데이터 수신 또는 종료 시까지 대기
-    ctx->cv.wait(lock, [&ctx] { return !ctx->chunks.empty() || ctx->done; });
+    ctx->cv.wait_for(lock, std::chrono::milliseconds(50), [&ctx] {
+      return !ctx->chunks.empty() || ctx->done;
+    });
+
     while (!ctx->chunks.empty()) {
       std::string c = std::move(ctx->chunks.front());
       ctx->chunks.pop();
       lock.unlock();
-      chunk_cb(c); // 전달받은 텍스트 전달
+      chunk_cb(c);
       lock.lock();
     }
+
     if (ctx->done) {
       lock.unlock();
       if (ctx->has_error) error_cb(ctx->error_msg);
-      else done_cb(); // 완료 통보
+      else done_cb();
       break;
     }
   }
+
   litert_lm_conversation_delete(conversation);
 }

@@ -8,6 +8,7 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
 
 // API 서버 실행부 구현
 void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name) {
@@ -65,12 +66,18 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
 
       // 스트리밍 응답 처리 루틴
       if (want_stream) {
-        // 스트리밍 데이터를 모으기 위한 컨텍스트
-        struct SinkCtx { std::mutex mtx; std::condition_variable cv; std::queue<std::string> chunks; bool done = false; };
+        // 스트리밍 데이터를 모으기 위한 컨텍스트 및 취소 플래그
+        struct SinkCtx { 
+          std::mutex mtx; 
+          std::condition_variable cv; 
+          std::queue<std::string> chunks; 
+          bool done = false; 
+        };
         auto sink_ctx = std::make_shared<SinkCtx>();
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
 
         // 별도 스레드에서 엔진 실행 및 데이터 수신
-        std::thread([&app, sys_msg, history_json_str, current_msg_str, served_model_name, is_ollama, sink_ctx]() {
+        std::thread([&app, sys_msg, history_json_str, current_msg_str, served_model_name, is_ollama, sink_ctx, cancelled]() {
           app.StreamForServer(sys_msg, history_json_str, current_msg_str,
             // 엔진으로부터 텍스트 청크 수신 시
             [&served_model_name, is_ollama, sink_ctx](const std::string &chunk) {
@@ -94,11 +101,18 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
               sink_ctx->cv.notify_one();
             },
             // 오류 발생 시
-            [sink_ctx](const std::string &) { std::lock_guard<std::mutex> lock(sink_ctx->mtx); sink_ctx->done = true; sink_ctx->cv.notify_one(); });
+            [sink_ctx](const std::string &) { 
+              std::lock_guard<std::mutex> lock(sink_ctx->mtx); 
+              sink_ctx->done = true; 
+              sink_ctx->cv.notify_one(); 
+            },
+            // 클라이언트 연결 끊김 취소 체크
+            [cancelled]() { return cancelled->load(); }
+          );
         }).detach();
 
         // HTTP Chunked 데이터 전송 핸들러 설정
-        res.set_chunked_content_provider(is_ollama ? "application/x-ndjson" : "text/event-stream", [sink_ctx](size_t, httplib::DataSink &sink) {
+        res.set_chunked_content_provider(is_ollama ? "application/x-ndjson" : "text/event-stream", [sink_ctx, cancelled](size_t, httplib::DataSink &sink) {
           while (true) {
             std::unique_lock<std::mutex> lock(sink_ctx->mtx);
             sink_ctx->cv.wait(lock, [&sink_ctx]{ return !sink_ctx->chunks.empty() || sink_ctx->done; });
@@ -106,7 +120,11 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
               std::string data = std::move(sink_ctx->chunks.front());
               sink_ctx->chunks.pop();
               lock.unlock();
-              if (!sink.write(data.c_str(), data.size())) return false; // 연결 끊김 처리
+              if (!sink.write(data.c_str(), data.size())) {
+                // 클라이언트 연결 끊김 감지 -> 생성 취소 통보
+                cancelled->store(true);
+                return false;
+              }
               lock.lock();
             }
             if (sink_ctx->done) { sink.done(); return true; }
@@ -136,5 +154,6 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
   svr.Post("/api/chat", [&handle_chat_completion](const httplib::Request &req, httplib::Response &res) { handle_chat_completion(req, res, true); });
 
   // 서버 바인딩 및 수신 대기
+  std::cout << "[서버] 0.0.0.0:" << port << " 대기 중 (모델: " << served_model_name << ")" << std::endl;
   svr.listen("0.0.0.0", port);
 }
