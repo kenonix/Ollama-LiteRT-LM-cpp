@@ -2,7 +2,11 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import", "cc_library")
 
 cc_import(
     name = "litert_lm_import",
-    shared_library = "lib/liblitert-lm.so",
+    shared_library = select({
+        "@platforms//cpu:aarch64": "lib/aarch64/liblitert-lm.so",
+        "@platforms//cpu:x86_64": "lib/x86_64/liblitert-lm.so",
+        "//conditions:default": "lib/liblitert-lm.so",
+    }),
 )
 
 cc_library(
@@ -27,8 +31,6 @@ cc_binary(
         "main.cpp",
         "server_mode.cpp",
         "server_mode.h",
-        "tui_interface.cpp",
-        "tui_interface.h",
         "utils.cpp",
         "utils.h",
     ],
@@ -40,12 +42,10 @@ cc_binary(
         "-lpthread",
         "-ldl",
         "-Wl,-rpath,$ORIGIN/lib",
-        "-Wl,-rpath,/home/kenonix/gits/Ollama-LiteRT-LM-cpp/lib",
+        "-Wl,-rpath,$ORIGIN/lib/x86_64",
+        "-Wl,-rpath,$ORIGIN/lib/aarch64",
     ],
     deps = [
         ":litert_lm",
-        "@ftxui//:component",
-        "@ftxui//:dom",
-        "@ftxui//:screen",
     ],
 )

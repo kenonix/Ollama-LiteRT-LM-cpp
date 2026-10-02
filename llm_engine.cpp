@@ -4,6 +4,8 @@
 #include <fstream>
 #include <queue>
 #include <chrono>
+#include <condition_variable>
+#include <unistd.h>
 
 // 엔진 응답 JSON에서 텍스트를 파싱하여 추출
 std::string extract_text_from_chunk(const char *chunk) {
@@ -29,37 +31,6 @@ std::string extract_text_from_chunk(const char *chunk) {
   } catch (...) {}
   // 파싱 실패 시 원본 문자열 반환
   return std::string(chunk);
-}
-
-// 스트리밍 데이터를 가로채서 화면에 출력하고 완료 시 시그널링
-void stream_callback(void *callback_data, const LiteRtLmStreamChunk *chunk) {
-  auto *ctx = static_cast<StreamContext *>(callback_data);
-  if (!chunk) return;
-
-  const char *error_msg = litert_lm_stream_chunk_get_error(chunk);
-  if (error_msg) {
-    std::cerr << "\n[스트리밍 오류] " << error_msg << std::endl;
-    std::lock_guard<std::mutex> lock(ctx->mtx);
-    ctx->has_error = true;
-    ctx->error_msg = error_msg;
-    ctx->done = true;
-    ctx->cv.notify_one();
-    return;
-  }
-
-  const char *raw_chunk = litert_lm_stream_chunk_get_text(chunk);
-  if (raw_chunk) {
-    std::string text = extract_text_from_chunk(raw_chunk);
-    if (!text.empty()) {
-      std::cout << text << std::flush;
-    }
-  }
-
-  if (litert_lm_stream_chunk_is_final(chunk)) {
-    std::lock_guard<std::mutex> lock(ctx->mtx);
-    ctx->done = true;
-    ctx->cv.notify_one();
-  }
 }
 
 // MultimodalCliApp 생성자: 엔진 설정 및 인스턴스 생성
@@ -90,7 +61,15 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens_);
   litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
   litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
-  litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, "./lib");
+
+  // 디스패치 라이브러리 경로 (아키텍처별 경로 우선 확인)
+  std::string dispatch_dir = "./lib";
+#if defined(__aarch64__)
+  if (access("./lib/aarch64", F_OK) == 0) dispatch_dir = "./lib/aarch64";
+#elif defined(__x86_64__)
+  if (access("./lib/x86_64", F_OK) == 0) dispatch_dir = "./lib/x86_64";
+#endif
+  litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, dispatch_dir.c_str());
 
   // 엔진 인스턴스 생성
   engine_ = litert_lm_engine_create(settings);
@@ -108,81 +87,6 @@ MultimodalCliApp::~MultimodalCliApp() {
     litert_lm_engine_delete(engine_);
     engine_ = nullptr;
   }
-}
-
-// CLI 상호작용 루프 실행
-void MultimodalCliApp::RunInteractive() {
-  std::string sys_json = json({{"role", "system"}, {"content", system_prompt_}}).dump();
-
-  LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
-  if (session_config) {
-    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
-  }
-
-  // 대화 세션 설정 생성
-  LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
-  if (conv_config) {
-    if (session_config) {
-      litert_lm_conversation_config_set_session_config(conv_config, session_config);
-    }
-    litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
-  }
-  if (session_config)
-    litert_lm_session_config_delete(session_config);
-
-  // 대화 인스턴스 생성
-  LiteRtLmConversation *conversation =
-      litert_lm_conversation_create(engine_, conv_config);
-  if (conv_config)
-    litert_lm_conversation_config_delete(conv_config);
-
-  if (!conversation)
-    throw std::runtime_error("대화 세션 생성 실패");
-
-  std::string user_input, image_input;
-  while (true) {
-    std::cout << "User (입력 없으면 빈칸 후 엔터) > ";
-    if (!std::getline(std::cin, user_input) || user_input == "/exit")
-      break;
-
-    std::cout << "Image Path (없으면 엔터) > ";
-    std::getline(std::cin, image_input);
-    image_input = expand_path(trim(image_input));
-
-    if (user_input.empty() && image_input.empty())
-      continue;
-
-    // 메시지 구성 (텍스트 전용 또는 멀티모달)
-    std::string message_json;
-    if (image_input.empty()) {
-      message_json = json({{"role", "user"}, {"content", user_input}}).dump();
-    } else {
-      // 이미지가 포함된 경우 (리스트 형태의 content)
-      if (user_input.empty() || user_input == " ") {
-        message_json = json({{"role", "user"}, {"content", json::array({{{"type", "image"}, {"path", image_input}}})}}).dump();
-      } else {
-        message_json = json({{"role", "user"}, {"content", json::array({{{"type", "image"}, {"path", image_input}}, {{"type", "text"}, {"text", user_input}}})}}).dump();
-      }
-    }
-
-    std::cout << "\n";
-    StreamContext ctx;
-    int stream_result = litert_lm_conversation_send_message_stream(
-        conversation, message_json.c_str(), nullptr, nullptr, stream_callback, &ctx);
-
-    if (stream_result != 0) {
-      std::cerr << "[오류] 스트리밍 시작 실패 (코드: " << stream_result << ")" << std::endl;
-    } else {
-      // 스트리밍이 완료될 때까지 대기
-      std::unique_lock<std::mutex> lock(ctx.mtx);
-      ctx.cv.wait(lock, [&ctx] { return ctx.done; });
-      if (ctx.has_error) {
-        std::cerr << "\n[오류] 스트리밍 중 에러: " << ctx.error_msg << std::endl;
-      }
-    }
-    std::cout << "\n" << std::endl;
-  }
-  litert_lm_conversation_delete(conversation);
 }
 
 // 서버 요청을 위한 비스트리밍(동기) 응답 생성

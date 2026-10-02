@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/kenonix/gits/Ollama-LiteRT-LM-cpp/LiteRT-LM
+CXX_INCLUDES = -I/home/kenonix/gits/Ollama-LiteRT-LM-cpp/include -I/home/kenonix/gits/Ollama-LiteRT-LM-cpp
 
 CXX_FLAGS = -std=gnu++17
 

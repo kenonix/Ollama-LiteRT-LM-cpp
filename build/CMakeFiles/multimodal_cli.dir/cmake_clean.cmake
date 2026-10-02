@@ -8,8 +8,6 @@ file(REMOVE_RECURSE
   "CMakeFiles/multimodal_cli.dir/main.cpp.o.d"
   "CMakeFiles/multimodal_cli.dir/server_mode.cpp.o"
   "CMakeFiles/multimodal_cli.dir/server_mode.cpp.o.d"
-  "CMakeFiles/multimodal_cli.dir/tui_interface.cpp.o"
-  "CMakeFiles/multimodal_cli.dir/tui_interface.cpp.o.d"
   "CMakeFiles/multimodal_cli.dir/utils.cpp.o"
   "CMakeFiles/multimodal_cli.dir/utils.cpp.o.d"
   "multimodal_cli"

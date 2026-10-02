@@ -225,30 +225,6 @@ server_mode.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/multimodal_cli.dir/build.make CMakeFiles/multimodal_cli.dir/server_mode.cpp.s
 .PHONY : server_mode.cpp.s
 
-tui_interface.o: tui_interface.cpp.o
-.PHONY : tui_interface.o
-
-# target to build an object file
-tui_interface.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/multimodal_cli.dir/build.make CMakeFiles/multimodal_cli.dir/tui_interface.cpp.o
-.PHONY : tui_interface.cpp.o
-
-tui_interface.i: tui_interface.cpp.i
-.PHONY : tui_interface.i
-
-# target to preprocess a source file
-tui_interface.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/multimodal_cli.dir/build.make CMakeFiles/multimodal_cli.dir/tui_interface.cpp.i
-.PHONY : tui_interface.cpp.i
-
-tui_interface.s: tui_interface.cpp.s
-.PHONY : tui_interface.s
-
-# target to generate assembly for a file
-tui_interface.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/multimodal_cli.dir/build.make CMakeFiles/multimodal_cli.dir/tui_interface.cpp.s
-.PHONY : tui_interface.cpp.s
-
 utils.o: utils.cpp.o
 .PHONY : utils.o
 
@@ -294,9 +270,6 @@ help:
 	@echo "... server_mode.o"
 	@echo "... server_mode.i"
 	@echo "... server_mode.s"
-	@echo "... tui_interface.o"
-	@echo "... tui_interface.i"
-	@echo "... tui_interface.s"
 	@echo "... utils.o"
 	@echo "... utils.i"
 	@echo "... utils.s"

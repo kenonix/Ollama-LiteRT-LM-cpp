@@ -20,6 +20,7 @@ events:
     names:
       - "uname"
     candidate_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -27,12 +28,18 @@ events:
       - "/home/kenonix/.lmstudio/bin/"
       - "/bin/"
     searched_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/uname"
       - "/home/kenonix/.local/bin/uname"
       - "/home/kenonix/bin/uname"
       - "/usr/local/bin/uname"
     found: "/usr/bin/uname"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -47,7 +54,7 @@ events:
       - "/usr/share/cmake/Modules/CMakeDetermineSystem.cmake:212 (message)"
       - "CMakeLists.txt:2 (project)"
     message: |
-      The system is: Linux - 6.19.10-300.fc44.x86_64 - x86_64
+      The system is: Linux - 7.2.7-200.fc44.x86_64 - x86_64
   -
     kind: "find-v1"
     backtrace:
@@ -69,18 +76,25 @@ events:
       - "make"
       - "smake"
     candidate_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/usr/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/gmake"
       - "/home/kenonix/.local/bin/gmake"
       - "/home/kenonix/bin/gmake"
       - "/usr/local/bin/gmake"
     found: "/usr/bin/gmake"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -118,18 +132,25 @@ events:
       - "icx"
       - "clang++"
     candidate_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/usr/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
+      - "/home/kenonix/.gemini/antigravity/bin/c++"
       - "/home/kenonix/.local/bin/c++"
       - "/home/kenonix/bin/c++"
       - "/usr/local/bin/c++"
     found: "/usr/bin/c++"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -165,6 +186,11 @@ events:
     found: "/usr/share/cmake/Modules/CMakeCXXCompilerId.cpp.in"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -216,6 +242,7 @@ events:
       - "ar"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -223,6 +250,11 @@ events:
     found: "/usr/bin/ar"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -252,6 +284,7 @@ events:
       - "ranlib"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -259,6 +292,11 @@ events:
     found: "/usr/bin/ranlib"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -288,6 +326,7 @@ events:
       - "strip"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -295,6 +334,11 @@ events:
     found: "/usr/bin/strip"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -324,6 +368,7 @@ events:
       - "ld"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -331,6 +376,11 @@ events:
     found: "/usr/bin/ld"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -360,6 +410,7 @@ events:
       - "nm"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -367,6 +418,11 @@ events:
     found: "/usr/bin/nm"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -396,6 +452,7 @@ events:
       - "objdump"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -403,6 +460,11 @@ events:
     found: "/usr/bin/objdump"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -432,6 +494,7 @@ events:
       - "objcopy"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -439,6 +502,11 @@ events:
     found: "/usr/bin/objcopy"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -468,6 +536,7 @@ events:
       - "readelf"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -475,6 +544,11 @@ events:
     found: "/usr/bin/readelf"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -504,12 +578,14 @@ events:
       - "dlltool"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
       - "/usr/bin/dlltool"
+      - "/home/kenonix/.gemini/antigravity/bin/dlltool"
       - "/home/kenonix/.local/bin/dlltool"
       - "/home/kenonix/bin/dlltool"
       - "/usr/local/bin/dlltool"
@@ -517,6 +593,11 @@ events:
     found: false
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -546,6 +627,7 @@ events:
       - "addr2line"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
@@ -553,6 +635,11 @@ events:
     found: "/usr/bin/addr2line"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -582,12 +669,14 @@ events:
       - "tapi"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
       - "/usr/bin/tapi"
+      - "/home/kenonix/.gemini/antigravity/bin/tapi"
       - "/home/kenonix/.local/bin/tapi"
       - "/home/kenonix/bin/tapi"
       - "/usr/local/bin/tapi"
@@ -595,6 +684,11 @@ events:
     found: false
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -621,28 +715,32 @@ events:
       CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
       CMAKE_FIND_USE_INSTALL_PREFIX: true
     names:
-      - "gcc-ar-16.1"
+      - "gcc-ar-16.2"
       - "gcc-ar-16"
       - "gcc-ar16"
       - "gcc-ar"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
-      - "/usr/bin/gcc-ar-16.1"
-      - "/home/kenonix/.local/bin/gcc-ar-16.1"
-      - "/home/kenonix/bin/gcc-ar-16.1"
-      - "/usr/local/bin/gcc-ar-16.1"
-      - "/home/kenonix/.lmstudio/bin/gcc-ar-16.1"
+      - "/usr/bin/gcc-ar-16.2"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ar-16.2"
+      - "/home/kenonix/.local/bin/gcc-ar-16.2"
+      - "/home/kenonix/bin/gcc-ar-16.2"
+      - "/usr/local/bin/gcc-ar-16.2"
+      - "/home/kenonix/.lmstudio/bin/gcc-ar-16.2"
       - "/usr/bin/gcc-ar-16"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ar-16"
       - "/home/kenonix/.local/bin/gcc-ar-16"
       - "/home/kenonix/bin/gcc-ar-16"
       - "/usr/local/bin/gcc-ar-16"
       - "/home/kenonix/.lmstudio/bin/gcc-ar-16"
       - "/usr/bin/gcc-ar16"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ar16"
       - "/home/kenonix/.local/bin/gcc-ar16"
       - "/home/kenonix/bin/gcc-ar16"
       - "/usr/local/bin/gcc-ar16"
@@ -650,6 +748,11 @@ events:
     found: "/usr/bin/gcc-ar"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -676,28 +779,32 @@ events:
       CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
       CMAKE_FIND_USE_INSTALL_PREFIX: true
     names:
-      - "gcc-ranlib-16.1"
+      - "gcc-ranlib-16.2"
       - "gcc-ranlib-16"
       - "gcc-ranlib16"
       - "gcc-ranlib"
     candidate_directories:
       - "/usr/bin/"
+      - "/home/kenonix/.gemini/antigravity/bin/"
       - "/home/kenonix/.local/bin/"
       - "/home/kenonix/bin/"
       - "/usr/local/bin/"
       - "/home/kenonix/.lmstudio/bin/"
     searched_directories:
-      - "/usr/bin/gcc-ranlib-16.1"
-      - "/home/kenonix/.local/bin/gcc-ranlib-16.1"
-      - "/home/kenonix/bin/gcc-ranlib-16.1"
-      - "/usr/local/bin/gcc-ranlib-16.1"
-      - "/home/kenonix/.lmstudio/bin/gcc-ranlib-16.1"
+      - "/usr/bin/gcc-ranlib-16.2"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ranlib-16.2"
+      - "/home/kenonix/.local/bin/gcc-ranlib-16.2"
+      - "/home/kenonix/bin/gcc-ranlib-16.2"
+      - "/usr/local/bin/gcc-ranlib-16.2"
+      - "/home/kenonix/.lmstudio/bin/gcc-ranlib-16.2"
       - "/usr/bin/gcc-ranlib-16"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ranlib-16"
       - "/home/kenonix/.local/bin/gcc-ranlib-16"
       - "/home/kenonix/bin/gcc-ranlib-16"
       - "/usr/local/bin/gcc-ranlib-16"
       - "/home/kenonix/.lmstudio/bin/gcc-ranlib-16"
       - "/usr/bin/gcc-ranlib16"
+      - "/home/kenonix/.gemini/antigravity/bin/gcc-ranlib16"
       - "/home/kenonix/.local/bin/gcc-ranlib16"
       - "/home/kenonix/bin/gcc-ranlib16"
       - "/usr/local/bin/gcc-ranlib16"
@@ -705,6 +812,11 @@ events:
     found: "/usr/bin/gcc-ranlib"
     search_context:
       ENV{PATH}:
+        - "/home/kenonix/.gemini/antigravity/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
+        - "/home/kenonix/.local/bin"
         - "/home/kenonix/.local/bin"
         - "/home/kenonix/bin"
         - "/usr/local/bin"
@@ -722,8 +834,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY"
-      binary: "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY"
+      source: "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI"
+      binary: "/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI"
     cmakeVariables:
       CMAKE_CXX_FLAGS: ""
       CMAKE_CXX_FLAGS_DEBUG: "-g"
@@ -734,28 +846,27 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY'
+        Change Dir: '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ae838/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_ae838.dir/build.make CMakeFiles/cmTC_ae838.dir/build
-        gmake[1]: Entering directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY'
-        Building CXX object CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o
-        /usr/bin/c++   -v -o CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e2df8/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_e2df8.dir/build.make CMakeFiles/cmTC_e2df8.dir/build
+        gmake[1]: Entering directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI'
+        Building CXX object CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -v -o CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp
         Using built-in specs.
         COLLECT_GCC=/usr/bin/c++
         OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
         OFFLOAD_TARGET_DEFAULT=1
         Target: x86_64-redhat-linux
-        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.1.1-build/gcc-16.1.1-20260515/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none,amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp
+        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none,amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp
         Thread model: posix
         Supported LTO compression algorithms: zlib zstd
-        gcc version 16.1.1 20260515 (Red Hat 16.1.1-2) (GCC) 
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/'
-         /usr/libexec/gcc/x86_64-redhat-linux/16/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_ae838.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -mtls-dialect=gnu2 -version -o /tmp/ccCbbV4a.s
-        GNU C++20 (GCC) version 16.1.1 20260515 (Red Hat 16.1.1-2) (x86_64-redhat-linux)
-        	compiled by GNU C version 16.1.1 20260515 (Red Hat 16.1.1-2), GMP version 6.3.0, MPFR version 4.2.2, MPC version 1.4.1, isl version isl-0.24-GMP
+        gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/'
+         /usr/libexec/gcc/x86_64-redhat-linux/16/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_e2df8.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -mtls-dialect=gnu2 -version -o /tmp/ccyaAnPO.s
+        GNU C++20 (GCC) version 16.2.1 20260819 (Red Hat 16.2.1-2) (x86_64-redhat-linux)
+        	compiled by GNU C version 16.2.1 20260819 (Red Hat 16.2.1-2), GMP version 6.3.0, MPFR version 4.2.2, MPC version 1.4.1, isl version isl-0.24-GMP
         
-        warning: MPC header version 1.4.1 differs from library version 1.4.0.
         GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
         ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/16/include-fixed"
         ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/16/../../../../x86_64-redhat-linux/include"
@@ -768,35 +879,35 @@ events:
          /usr/local/include
          /usr/include
         End of search list.
-        Compiler executable checksum: f7f3cb99b253d13f382d2bbd7f6c1fbf
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/'
-         as -v --64 -o CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccCbbV4a.s
-        GNU assembler version 2.46 (x86_64-redhat-linux) using BFD version version 2.46-1.fc44
+        Compiler executable checksum: 65ab9aa42e0ee60985a3e473fe6610c4
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/'
+         as -v --64 -o CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccyaAnPO.s
+        GNU assembler version 2.46.1 (x86_64-redhat-linux) using BFD version version 2.46.1-1.fc44
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.'
-        Linking CXX executable cmTC_ae838
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ae838.dir/link.txt --verbose=1
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.'
+        Linking CXX executable cmTC_e2df8
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e2df8.dir/link.txt --verbose=1
         Using built-in specs.
         COLLECT_GCC=/usr/bin/c++
         COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper
         OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
         OFFLOAD_TARGET_DEFAULT=1
         Target: x86_64-redhat-linux
-        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.1.1-build/gcc-16.1.1-20260515/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none,amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp
+        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none,amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp
         Thread model: posix
         Supported LTO compression algorithms: zlib zstd
-        gcc version 16.1.1 20260515 (Red Hat 16.1.1-2) (GCC) 
+        gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) 
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ae838' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_ae838.'
-         /usr/libexec/gcc/x86_64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccoL1XUH.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ae838 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o
-        collect2 version 16.1.1 20260515 (Red Hat 16.1.1-2)
-        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccoL1XUH.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ae838 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o
-        GNU ld version 2.46-1.fc44
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ae838' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_ae838.'
-        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_ae838
-        gmake[1]: Leaving directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY'
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_e2df8' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_e2df8.'
+         /usr/libexec/gcc/x86_64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/cc3mkaA1.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e2df8 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o
+        collect2 version 16.2.1 20260819 (Red Hat 16.2.1-2)
+        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/cc3mkaA1.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e2df8 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o
+        GNU ld version 2.46.1-1.fc44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_e2df8' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_e2df8.'
+        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_e2df8
+        gmake[1]: Leaving directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI'
         
       exitCode: 0
   -
@@ -835,28 +946,27 @@ events:
       Parsed CXX implicit link information:
         link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
         linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)))("|,| |$)]
-        ignore line: [Change Dir: '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY']
+        ignore line: [Change Dir: '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI']
         ignore line: []
-        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ae838/fast]
-        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_ae838.dir/build.make CMakeFiles/cmTC_ae838.dir/build]
-        ignore line: [gmake[1]: Entering directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-ys5VkY']
-        ignore line: [Building CXX object CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o]
-        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e2df8/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_e2df8.dir/build.make CMakeFiles/cmTC_e2df8.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/kenonix/gits/Ollama-LiteRT-LM-cpp/build/CMakeFiles/CMakeScratch/TryCompile-qBFccI']
+        ignore line: [Building CXX object CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/c++]
         ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
         ignore line: [OFFLOAD_TARGET_DEFAULT=1]
         ignore line: [Target: x86_64-redhat-linux]
-        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.1.1-build/gcc-16.1.1-20260515/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp]
+        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp]
         ignore line: [Thread model: posix]
         ignore line: [Supported LTO compression algorithms: zlib zstd]
-        ignore line: [gcc version 16.1.1 20260515 (Red Hat 16.1.1-2) (GCC) ]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/']
-        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/16/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_ae838.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -mtls-dialect=gnu2 -version -o /tmp/ccCbbV4a.s]
-        ignore line: [GNU C++20 (GCC) version 16.1.1 20260515 (Red Hat 16.1.1-2) (x86_64-redhat-linux)]
-        ignore line: [	compiled by GNU C version 16.1.1 20260515 (Red Hat 16.1.1-2)  GMP version 6.3.0  MPFR version 4.2.2  MPC version 1.4.1  isl version isl-0.24-GMP]
+        ignore line: [gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/16/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_e2df8.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -mtls-dialect=gnu2 -version -o /tmp/ccyaAnPO.s]
+        ignore line: [GNU C++20 (GCC) version 16.2.1 20260819 (Red Hat 16.2.1-2) (x86_64-redhat-linux)]
+        ignore line: [	compiled by GNU C version 16.2.1 20260819 (Red Hat 16.2.1-2)  GMP version 6.3.0  MPFR version 4.2.2  MPC version 1.4.1  isl version isl-0.24-GMP]
         ignore line: []
-        ignore line: [warning: MPC header version 1.4.1 differs from library version 1.4.0.]
         ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
         ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/16/include-fixed"]
         ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/16/../../../../x86_64-redhat-linux/include"]
@@ -869,34 +979,34 @@ events:
         ignore line: [ /usr/local/include]
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
-        ignore line: [Compiler executable checksum: f7f3cb99b253d13f382d2bbd7f6c1fbf]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/']
-        ignore line: [ as -v --64 -o CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccCbbV4a.s]
-        ignore line: [GNU assembler version 2.46 (x86_64-redhat-linux) using BFD version version 2.46-1.fc44]
+        ignore line: [Compiler executable checksum: 65ab9aa42e0ee60985a3e473fe6610c4]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccyaAnPO.s]
+        ignore line: [GNU assembler version 2.46.1 (x86_64-redhat-linux) using BFD version version 2.46.1-1.fc44]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.']
-        ignore line: [Linking CXX executable cmTC_ae838]
-        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ae838.dir/link.txt --verbose=1]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.']
+        ignore line: [Linking CXX executable cmTC_e2df8]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e2df8.dir/link.txt --verbose=1]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/c++]
         ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper]
         ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
         ignore line: [OFFLOAD_TARGET_DEFAULT=1]
         ignore line: [Target: x86_64-redhat-linux]
-        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.1.1-build/gcc-16.1.1-20260515/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp]
+        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-x86_64-redhat-linux/isl-install --enable-offload-targets=nvptx-none amdgcn-amdhsa --enable-offload-defaulted --without-cuda-driver --enable-gnu-indirect-function --enable-cet --with-tune=generic --with-tls=gnu2 --with-arch_32=i686 --build=x86_64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp]
         ignore line: [Thread model: posix]
         ignore line: [Supported LTO compression algorithms: zlib zstd]
-        ignore line: [gcc version 16.1.1 20260515 (Red Hat 16.1.1-2) (GCC) ]
+        ignore line: [gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) ]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/16/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/16/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/16/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ae838' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_ae838.']
-        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccoL1XUH.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ae838 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_e2df8' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-mtls-dialect=gnu2' '-dumpdir' 'cmTC_e2df8.']
+        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/cc3mkaA1.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e2df8 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o]
           arg [/usr/libexec/gcc/x86_64-redhat-linux/16/collect2] ==> ignore
           arg [-plugin] ==> ignore
           arg [/usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so] ==> ignore
           arg [-plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper] ==> ignore
-          arg [-plugin-opt=-fresolution=/tmp/ccoL1XUH.res] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/cc3mkaA1.res] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
           arg [-plugin-opt=-pass-through=-latomic_asneeded] ==> ignore
@@ -912,7 +1022,7 @@ events:
           arg [-dynamic-linker] ==> ignore
           arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
           arg [-o] ==> ignore
-          arg [cmTC_ae838] ==> ignore
+          arg [cmTC_e2df8] ==> ignore
           arg [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o]
@@ -924,7 +1034,7 @@ events:
           arg [-L/lib] ==> dir [/lib]
           arg [-L/usr/lib] ==> dir [/usr/lib]
           arg [-v] ==> ignore
-          arg [CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
           arg [-lstdc++] ==> lib [stdc++]
           arg [-lm] ==> lib [m]
           arg [-lgcc_s] ==> lib [gcc_s]
@@ -935,8 +1045,8 @@ events:
           arg [-lgcc] ==> lib [gcc]
           arg [/usr/lib/gcc/x86_64-redhat-linux/16/crtend.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/16/crtend.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o]
-        ignore line: [collect2 version 16.1.1 20260515 (Red Hat 16.1.1-2)]
-        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccoL1XUH.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ae838 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ae838.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o]
+        ignore line: [collect2 version 16.2.1 20260819 (Red Hat 16.2.1-2)]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/cc3mkaA1.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e2df8 /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/16 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_e2df8.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -latomic_asneeded -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/16/crtend.o /usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crtn.o]
         linker tool for 'CXX': /usr/bin/ld
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crt1.o] ==> [/usr/lib64/crt1.o]
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/16/../../../../lib64/crti.o] ==> [/usr/lib64/crti.o]
@@ -963,5 +1073,5 @@ events:
       - "CMakeLists.txt:2 (project)"
     message: |
       Running the CXX compiler's linker: "/usr/bin/ld" "-v"
-      GNU ld version 2.46-1.fc44
+      GNU ld version 2.46.1-1.fc44
 ...
