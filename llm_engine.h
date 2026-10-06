@@ -8,7 +8,23 @@
 #include <string>
 #include <functional>
 
+#include <vector>
+
 using json = nlohmann::ordered_json;
+
+/**
+ * @brief 생성 옵션 파라미터 구조체 (OpenAI / Ollama 공용)
+ */
+struct GenerationOptions {
+  float temperature = 0.7f;
+  float top_p = 0.95f;
+  int top_k = 40;
+  int max_tokens = 2048;
+  int seed = -1;
+  float frequency_penalty = 0.0f;
+  float presence_penalty = 0.0f;
+  std::vector<std::string> stop;
+};
 
 /**
  * @brief 엔진이 반환한 JSON 청크 데이터에서 텍스트 콘텐츠를 추출합니다.
@@ -26,7 +42,7 @@ private:
   LiteRtLmEngine *engine_ = nullptr; // 엔진 인스턴스 포인터
   std::string system_prompt_;        // 활성화된 시스템 프롬프트
   int max_tokens_ = 2048;            // 최대 토큰 수
-  std::mutex engine_mutex_;          // 엔진 호출 직렬화 뮤텍스 (RAM 오버 및 레이스 방지)
+  std::recursive_mutex engine_mutex_; // 엔진 호출 직렬화 뮤텍스 (재귀적 잠금 지원)
 
 public:
   // 생성자: 모델 경로와 시스템 프롬프트를 사용하여 엔진 초기화
@@ -34,10 +50,14 @@ public:
   // 소멸자: 엔진 자원 해제
   ~MultimodalCliApp();
 
+  // 텍스트 토큰 수 계산 (정확한 사용량 산출)
+  int CountTokens(const std::string &text);
+
   // 서버용 동기 생성 함수 (OpenAI/Ollama API 대응)
   std::string GenerateForServer(const std::string &system_msg_str,
                                 const std::string &history_json,
-                                const std::string &current_msg);
+                                const std::string &current_msg,
+                                const GenerationOptions &opts = {});
 
   // 서버용 스트리밍 생성 함수 (취소 콜백 지원)
   void StreamForServer(const std::string &system_msg_str,
@@ -46,5 +66,6 @@ public:
                        std::function<void(const std::string &chunk)> chunk_cb,
                        std::function<void()> done_cb,
                        std::function<void(const std::string &err)> error_cb,
-                       std::function<bool()> is_cancelled = nullptr);
+                       std::function<bool()> is_cancelled = nullptr,
+                       const GenerationOptions &opts = {});
 };

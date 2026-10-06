@@ -5,6 +5,7 @@
 #include <ctime>
 #include <vector>
 #include <unistd.h>
+#include <random>
 
 // 문자열의 앞뒤 공백 제거 구현
 std::string trim(const std::string &s) {
@@ -88,4 +89,56 @@ std::string save_base64_to_temp_file(const std::string &b64_data) {
   fwrite(decoded.data(), 1, decoded.size(), f);
   fclose(f);
   return std::string(tmp_path);
+}
+
+// 무작위 식별자(ID) 문자열 생성 구현
+std::string generate_random_id(const std::string &prefix) {
+  static const char charset[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  static std::mt19937_64 rng(std::random_device{}());
+  static std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+  std::string id = prefix;
+  for (int i = 0; i < 28; ++i) {
+    id += charset[dist(rng)];
+  }
+  return id;
+}
+
+// 이미지 소스 판별 및 파일 경로 획득 구현
+std::string save_image_source_to_temp_file(const std::string &source, bool &is_temp) {
+  is_temp = false;
+  if (source.empty()) return "";
+
+  // 1. 이미 존재하는 로컬 파일인지 확인
+  std::string expanded = expand_path(source);
+  if (access(expanded.c_str(), R_OK) == 0) {
+    is_temp = false;
+    return expanded;
+  }
+
+  // 2. HTTP 또는 HTTPS URL인 경우 curl로 다운로드
+  if (source.rfind("http://", 0) == 0 || source.rfind("https://", 0) == 0) {
+    char tmp_path[] = "/tmp/litert_url_XXXXXX.png";
+    int fd = mkstemps(tmp_path, 4);
+    if (fd == -1) return "";
+    close(fd);
+
+    std::string cmd = "curl -s -L --max-time 15 \"" + source + "\" -o \"" + tmp_path + "\"";
+    int ret = std::system(cmd.c_str());
+    if (ret == 0 && access(tmp_path, R_OK) == 0) {
+      is_temp = true;
+      return std::string(tmp_path);
+    } else {
+      std::remove(tmp_path);
+      return "";
+    }
+  }
+
+  // 3. Base64 형식인 경우 디코딩하여 임시 파일로 저장
+  std::string b64_path = save_base64_to_temp_file(source);
+  if (!b64_path.empty()) {
+    is_temp = true;
+    return b64_path;
+  }
+
+  return "";
 }

@@ -34,6 +34,8 @@ int main(int argc, char *argv[]) {
     if (arg == "-h" || arg == "--help") {
       print_help(argv[0]);
       return 0;
+    } else if (arg == "--server") {
+      // 서버 모드 명시적 플래그 (기본값이 서버 모드이므로 유지)
     } else if (arg == "--gpu") {
       use_gpu = true;
     } else if (arg == "--port" && i + 1 < argc) {

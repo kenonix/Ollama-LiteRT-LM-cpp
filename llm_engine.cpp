@@ -82,24 +82,54 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
 
 // 소멸자: LiteRT-LM 엔진 자원 해제
 MultimodalCliApp::~MultimodalCliApp() {
-  std::lock_guard<std::mutex> lock(engine_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(engine_mutex_);
   if (engine_) {
     litert_lm_engine_delete(engine_);
     engine_ = nullptr;
   }
 }
 
+// 텍스트 토큰 수 계산 (LiteRT-LM 엔진 토크나이저 활용)
+int MultimodalCliApp::CountTokens(const std::string &text) {
+  if (text.empty()) return 0;
+  std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
+  if (!engine_) return std::max(1, static_cast<int>(text.size() / 3));
+
+  LiteRtLmTokenizeResult *res = litert_lm_engine_tokenize(engine_, text.c_str());
+  if (res) {
+    size_t count = litert_lm_tokenize_result_get_num_tokens(res);
+    litert_lm_tokenize_result_delete(res);
+    return static_cast<int>(count);
+  }
+  return std::max(1, static_cast<int>(text.size() / 3));
+}
+
 // 서버 요청을 위한 비스트리밍(동기) 응답 생성
 std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_str,
                                                 const std::string &history_json,
-                                                const std::string &current_msg) {
-  std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+                                                const std::string &current_msg,
+                                                const GenerationOptions &opts) {
+  std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
 
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
 
   LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
   if (session_config) {
-    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
+    int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
+    litert_lm_session_config_set_max_output_tokens(session_config, max_tok);
+
+    LiteRtLmSamplerType s_type = (opts.temperature <= 0.001f) ? kLiteRtLmSamplerTypeGreedy : kLiteRtLmSamplerTypeTopP;
+    LiteRtLmSamplerParams *sampler_params = litert_lm_sampler_params_create(s_type);
+    if (sampler_params) {
+      litert_lm_sampler_params_set_temperature(sampler_params, opts.temperature);
+      litert_lm_sampler_params_set_top_p(sampler_params, opts.top_p);
+      litert_lm_sampler_params_set_top_k(sampler_params, opts.top_k);
+      if (opts.seed >= 0) {
+        litert_lm_sampler_params_set_seed(sampler_params, opts.seed);
+      }
+      litert_lm_session_config_set_sampler_params(session_config, sampler_params);
+      litert_lm_sampler_params_delete(sampler_params);
+    }
   }
 
   // 대화 기록을 포함하여 세션 구성
@@ -123,10 +153,27 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
   if (!conversation)
     return "";
 
+  LiteRtLmConversationOptionalArgs *opt_args = litert_lm_conversation_optional_args_create();
+  if (opt_args) {
+    if (opts.frequency_penalty != 0.0f || opts.presence_penalty != 0.0f) {
+      LiteRtLmRepetitionPenaltyConfig *rep_cfg = litert_lm_repetition_penalty_config_create();
+      if (rep_cfg) {
+        litert_lm_repetition_penalty_config_set_presence_penalty(rep_cfg, opts.presence_penalty);
+        litert_lm_repetition_penalty_config_set_frequency_penalty(rep_cfg, opts.frequency_penalty);
+        litert_lm_conversation_optional_args_set_repetition_penalty_config(opt_args, rep_cfg);
+        litert_lm_repetition_penalty_config_delete(rep_cfg);
+      }
+    }
+  }
+
   std::string out_text = "";
   // 동기식 메시지 전송
   LiteRtLmJsonResponse *response_obj = litert_lm_conversation_send_message(
-      conversation, current_msg.c_str(), nullptr, nullptr);
+      conversation, current_msg.c_str(), nullptr, opt_args);
+  if (opt_args) {
+    litert_lm_conversation_optional_args_delete(opt_args);
+  }
+
   if (response_obj) {
     const char *res_text = litert_lm_json_response_get_string(response_obj);
     if (res_text) {
@@ -148,6 +195,22 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
     litert_lm_json_response_delete(response_obj);
   }
   litert_lm_conversation_delete(conversation);
+
+  // Stop 시퀀스 자르기 처리
+  if (!opts.stop.empty()) {
+    size_t earliest = std::string::npos;
+    for (const auto &sw : opts.stop) {
+      if (sw.empty()) continue;
+      size_t pos = out_text.find(sw);
+      if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
+        earliest = pos;
+      }
+    }
+    if (earliest != std::string::npos) {
+      out_text = out_text.substr(0, earliest);
+    }
+  }
+
   return out_text;
 }
 
@@ -158,14 +221,29 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
                                       std::function<void(const std::string &chunk)> chunk_cb,
                                       std::function<void()> done_cb,
                                       std::function<void(const std::string &err)> error_cb,
-                                      std::function<bool()> is_cancelled) {
-  std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+                                      std::function<bool()> is_cancelled,
+                                      const GenerationOptions &opts) {
+  std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
 
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
 
   LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
   if (session_config) {
-    litert_lm_session_config_set_max_output_tokens(session_config, max_tokens_);
+    int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
+    litert_lm_session_config_set_max_output_tokens(session_config, max_tok);
+
+    LiteRtLmSamplerType s_type = (opts.temperature <= 0.001f) ? kLiteRtLmSamplerTypeGreedy : kLiteRtLmSamplerTypeTopP;
+    LiteRtLmSamplerParams *sampler_params = litert_lm_sampler_params_create(s_type);
+    if (sampler_params) {
+      litert_lm_sampler_params_set_temperature(sampler_params, opts.temperature);
+      litert_lm_sampler_params_set_top_p(sampler_params, opts.top_p);
+      litert_lm_sampler_params_set_top_k(sampler_params, opts.top_k);
+      if (opts.seed >= 0) {
+        litert_lm_sampler_params_set_seed(sampler_params, opts.seed);
+      }
+      litert_lm_session_config_set_sampler_params(session_config, sampler_params);
+      litert_lm_sampler_params_delete(sampler_params);
+    }
   }
 
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
@@ -188,6 +266,19 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
   if (!conversation) {
     error_cb("대화 세션 생성 실패");
     return;
+  }
+
+  LiteRtLmConversationOptionalArgs *opt_args = litert_lm_conversation_optional_args_create();
+  if (opt_args) {
+    if (opts.frequency_penalty != 0.0f || opts.presence_penalty != 0.0f) {
+      LiteRtLmRepetitionPenaltyConfig *rep_cfg = litert_lm_repetition_penalty_config_create();
+      if (rep_cfg) {
+        litert_lm_repetition_penalty_config_set_presence_penalty(rep_cfg, opts.presence_penalty);
+        litert_lm_repetition_penalty_config_set_frequency_penalty(rep_cfg, opts.frequency_penalty);
+        litert_lm_conversation_optional_args_set_repetition_penalty_config(opt_args, rep_cfg);
+        litert_lm_repetition_penalty_config_delete(rep_cfg);
+      }
+    }
   }
 
   // 서버용 스트리밍 관리를 위한 내부 컨텍스트
@@ -227,13 +318,20 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
   };
 
   int result = litert_lm_conversation_send_message_stream(
-      conversation, current_msg.c_str(), nullptr, nullptr, callback, ctx.get());
+      conversation, current_msg.c_str(), nullptr, opt_args, callback, ctx.get());
+
+  if (opt_args) {
+    litert_lm_conversation_optional_args_delete(opt_args);
+  }
 
   if (result != 0) {
     error_cb("스트리밍 시작 실패 (코드: " + std::to_string(result) + ")");
     litert_lm_conversation_delete(conversation);
     return;
   }
+
+  std::string accumulated = "";
+  bool stop_triggered = false;
 
   // 큐 소비 루프: 데이터를 수신하는 대로 외부 콜백 호출, 취소 감지 시 cancel_process 호출
   while (true) {
@@ -251,8 +349,41 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
       std::string c = std::move(ctx->chunks.front());
       ctx->chunks.pop();
       lock.unlock();
-      chunk_cb(c);
+
+      if (!stop_triggered) {
+        if (!opts.stop.empty()) {
+          std::string test_str = accumulated + c;
+          size_t earliest = std::string::npos;
+          for (const auto &sw : opts.stop) {
+            if (sw.empty()) continue;
+            size_t pos = test_str.find(sw);
+            if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
+              earliest = pos;
+            }
+          }
+          if (earliest != std::string::npos) {
+            stop_triggered = true;
+            litert_lm_conversation_cancel_process(conversation);
+            if (earliest > accumulated.size()) {
+              std::string part_to_send = test_str.substr(accumulated.size(), earliest - accumulated.size());
+              if (!part_to_send.empty()) {
+                chunk_cb(part_to_send);
+              }
+            }
+            accumulated = test_str.substr(0, earliest);
+            lock.lock();
+            break;
+          }
+        }
+        accumulated += c;
+        chunk_cb(c);
+      }
       lock.lock();
+    }
+
+    if (stop_triggered) {
+      done_cb();
+      break;
     }
 
     if (ctx->done) {

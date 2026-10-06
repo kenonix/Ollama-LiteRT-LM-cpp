@@ -40,3 +40,20 @@ std::string base64_decode(const std::string &in);
  * @return std::string 생성된 임시 파일 절대 경로 (실패 시 빈 문자열)
  */
 std::string save_base64_to_temp_file(const std::string &b64_data);
+
+/**
+ * @brief 무작위 식별자(ID) 문자열을 생성합니다 (예: chatcmpl-xyz, cmpl-xyz).
+ * 
+ * @param prefix 접두사 (예: "chatcmpl-")
+ * @return std::string 접두사와 무작위 영숫자가 결합된 ID
+ */
+std::string generate_random_id(const std::string &prefix);
+
+/**
+ * @brief 이미지 소스(URL, Base64, 파일 경로)를 판별하여 로컬 파일 경로로 변환합니다.
+ * 
+ * @param source URL (http/https), Base64, 또는 로컬 파일 경로
+ * @param is_temp [out] 생성된 파일이 임시 파일인지 여부 (정리 대상 여부)
+ * @return std::string 로컬 파일 절대 경로 (실패 시 빈 문자열)
+ */
+std::string save_image_source_to_temp_file(const std::string &source, bool &is_temp);

@@ -36,8 +36,57 @@ LiteRT-LM 엔진을 사용하는 멀티모달(텍스트 및 이미지) AI API �
 ### API 서버
 기본 포트는 `11434`이며, `--port`로 변경할 수 있습니다.
 ```bash
-./bazel-bin/multimodal_cli --port 11434 <모델경로>
+./bazel-bin/multimodal_cli --gpu --port 11434 <모델경로>
 ```
+
+### 🌐 지원 API 엔드포인트
+
+이 서버는 **Ollama API**와 **OpenAI API**를 모두 완벽하게 지원합니다.
+
+#### 1. OpenAI 호환 API (`/v1` 및 프리픽스 없는 경로 모두 지원)
+- **`GET /v1/models` & `GET /models`**: 모델 목록 조회
+- **`GET /v1/models/{model}` & `GET /models/{model}`**: 모델 단건 상세 조회
+- **`POST /v1/chat/completions` & `POST /chat/completions`**: 채팅 완료 (Streaming 및 Non-streaming, Vision 이미지 분석, `stream_options.include_usage`, `developer` role, `stop` 시퀀스 등 완벽 대응)
+- **`POST /v1/completions` & `POST /completions`**: 레거시 텍스트 완성 API
+- **`POST /v1/embeddings`**: 미지원 시 규격에 맞는 안내 에러(400) 반환
+
+##### Python `openai` SDK 사용 예시
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:11434/v1",
+    api_key="none"  # 로컬 서버이므로 임의의 값
+)
+
+# 1. 모델 목록 확인
+models = client.models.list()
+print("사용 가능한 모델:", [m.id for m in models])
+
+# 2. 스트리밍 채팅
+response = client.chat.completions.create(
+    model="litert-lm:latest",
+    messages=[
+        {"role": "system", "content": "친절한 AI 조수입니다."},
+        {"role": "user", "content": "대한민국의 수도는 어디인가요?"}
+    ],
+    temperature=0.7,
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+print()
+```
+
+#### 2. Ollama 호환 API
+- **`GET /`**: 상태 확인 (`Ollama is running`)
+- **`GET /api/version`**: 버전 확인
+- **`GET /api/tags`**: 모델 목록
+- **`POST /api/show`**: 모델 세부 정보
+- **`POST /api/chat`**: 채팅 완료 (멀티턴, 이미지 Base64, 스트리밍)
+- **`POST /api/generate`**: 단일 프롬프트 생성 (스트리밍/비스트리밍)
 
 ## 📂 프로젝트 구조
 
