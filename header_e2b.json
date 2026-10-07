@@ -1,0 +1,201 @@
+{
+  "system_metadata": {
+    "entries": [
+      {
+        "key": "author",
+        "value_type": "StringValue",
+        "value": {
+          "value": "The ODML Authors"
+        }
+      }
+    ]
+  },
+  "section_metadata": {
+    "objects": [
+      {
+        "items": [
+
+        ],
+        "begin_offset": 16384,
+        "end_offset": 28576,
+        "data_type": "LlmMetadataProto"
+      },
+      {
+        "items": [
+
+        ],
+        "begin_offset": 32768,
+        "end_offset": 4721781,
+        "data_type": "SP_Tokenizer"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_embedder"
+            }
+          }
+        ],
+        "begin_offset": 4734976,
+        "end_offset": 108546696,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_per_layer_embedder"
+            }
+          }
+        ],
+        "begin_offset": 108560384,
+        "end_offset": 1393078776,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_audio_encoder_hw"
+            }
+          },
+          {
+            "key": "backend_constraint",
+            "value_type": "StringValue",
+            "value": {
+              "value": "cpu"
+            }
+          }
+        ],
+        "begin_offset": 1393082368,
+        "end_offset": 1487134648,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_audio_adapter"
+            }
+          },
+          {
+            "key": "backend_constraint",
+            "value_type": "StringValue",
+            "value": {
+              "value": "cpu"
+            }
+          }
+        ],
+        "begin_offset": 1487142912,
+        "end_offset": 1496584156,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_end_of_audio"
+            }
+          }
+        ],
+        "begin_offset": 1496596480,
+        "end_offset": 1496603252,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_vision_encoder"
+            }
+          }
+        ],
+        "begin_offset": 1496612864,
+        "end_offset": 1715702984,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_vision_adapter"
+            }
+          },
+          {
+            "key": "backend_constraint",
+            "value_type": "StringValue",
+            "value": {
+              "value": "cpu"
+            }
+          }
+        ],
+        "begin_offset": 1715716096,
+        "end_offset": 1720443208,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_end_of_vision"
+            }
+          }
+        ],
+        "begin_offset": 1720451072,
+        "end_offset": 1720457844,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_prefill_decode"
+            }
+          }
+        ],
+        "begin_offset": 1720467456,
+        "end_offset": 2538742640,
+        "data_type": "TFLiteModel"
+      },
+      {
+        "items": [
+          {
+            "key": "model_type",
+            "value_type": "StringValue",
+            "value": {
+              "value": "tf_lite_mtp_drafter"
+            }
+          },
+          {
+            "key": "backend_constraint",
+            "value_type": "StringValue",
+            "value": {
+              "value": "cpu"
+            }
+          }
+        ],
+        "begin_offset": 2538749952,
+        "end_offset": 2583082648,
+        "data_type": "TFLiteModel"
+      }
+    ]
+  }
+}
