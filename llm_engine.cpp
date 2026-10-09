@@ -34,7 +34,7 @@ std::string extract_text_from_chunk(const char *chunk) {
 }
 
 // MultimodalCliApp 생성자: 엔진 설정 및 인스턴스 생성
-MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt, bool use_gpu, int max_tokens)
+MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::string &system_prompt, bool use_gpu, int max_tokens, bool enable_mtp)
     : system_prompt_(system_prompt), max_tokens_(max_tokens) {
   // 시스템 프롬프트가 제공되지 않은 경우 파일에서 로드 시도
   if (system_prompt_.empty()) {
@@ -49,7 +49,8 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   }
 
   std::cout << "[시스템] 모델 로딩 중 (" << (use_gpu ? "GPU 가속" : "CPU") 
-            << ", Max Tokens: " << max_tokens_ << ")..." << std::endl;
+            << ", Max Tokens: " << max_tokens_ 
+            << (enable_mtp ? ", MTP 활성화" : ", MTP 비활성화") << ")..." << std::endl;
   // 엔진 설정 생성 (GPU/CPU 분기 설정)
   const char* backend = use_gpu ? "gpu" : "cpu";
   LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
@@ -61,6 +62,11 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens_);
   litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
   litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
+
+  if (enable_mtp) {
+    std::cout << "[시스템] MTP(Multi-Token Prediction / Speculative Decoding) 활성화 설정 적용..." << std::endl;
+    litert_lm_engine_settings_set_enable_speculative_decoding(settings, true);
+  }
 
   // 디스패치 라이브러리 경로 (아키텍처별 경로 우선 확인)
   std::string dispatch_dir = "./lib";

@@ -1004,5 +1004,12 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
 
   // 서버 바인딩 및 수신 대기
   std::cout << "[서버] 0.0.0.0:" << port << " 대기 중 (모델: " << served_model_name << ")" << std::endl;
-  svr.listen("0.0.0.0", port);
+  if (!svr.listen("0.0.0.0", port)) {
+    std::cerr << "\n[오류] 0.0.0.0:" << port << " 포트 바인딩에 실패했습니다!\n"
+              << "원인: 해당 포트를 이미 다른 프로세스(예: 백그라운드에서 실행 중인 기존 Ollama 서비스)가 점유하고 있습니다.\n"
+              << "해결 방법:\n"
+              << "  1) 기존 Ollama 서비스 중지: sudo systemctl stop ollama\n"
+              << "  2) 또는 다른 포트로 실행: PORT=11435 ./run.sh (또는 --port 11435)\n" << std::endl;
+    throw std::runtime_error("Port " + std::to_string(port) + " is already in use.");
+  }
 }
