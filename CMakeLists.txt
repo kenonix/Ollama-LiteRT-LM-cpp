@@ -34,6 +34,7 @@ add_executable(multimodal_cli
     utils.cpp
     config.cpp
     llm_engine.cpp
+    embedding_engine.cpp
     server_mode.cpp
 )
 

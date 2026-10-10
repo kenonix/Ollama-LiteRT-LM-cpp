@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llm_engine.h"
+#include "embedding_engine.h"
 #include <string>
 
 /**
@@ -9,5 +10,6 @@
  * @param app MultimodalCliApp 인스턴스 참조
  * @param port 서버가 대기할 포트 번호
  * @param served_model_name API 응답에서 보고할 모델명
+ * @param emb_engine EmbeddingEngineWrapper 포인터 (선택)
  */
-void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name);
+void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name, EmbeddingEngineWrapper *emb_engine = nullptr);

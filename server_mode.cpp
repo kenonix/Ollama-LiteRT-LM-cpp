@@ -284,7 +284,7 @@ static json make_openai_model_info(const std::string &model_name) {
 }
 
 // API 서버 실행부 구현
-void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name) {
+void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name, EmbeddingEngineWrapper *emb_engine) {
   httplib::Server svr;
 
   // CORS 및 프리플라이트 요청 처리 핸들러
@@ -310,16 +310,36 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
   });
 
   // 모델 목록 엔드포인트 (Ollama 호환)
-  svr.Get("/api/tags", [&served_model_name](const httplib::Request &, httplib::Response &res) {
-    json model_entry = {
-      {"name", served_model_name}, 
-      {"model", served_model_name}, 
-      {"modified_at", get_iso8601_now()}, 
-      {"size", 0}, 
-      {"digest", "000000000000"}, 
-      {"details", {{"format", "tflite"}, {"family", "litert"}, {"families", json::array({"litert"})}}}
-    };
-    json response = {{"models", json::array({model_entry})}};
+  svr.Get("/api/tags", [&served_model_name, emb_engine](const httplib::Request &, httplib::Response &res) {
+    json models = json::array({
+      {
+        {"name", served_model_name}, 
+        {"model", served_model_name}, 
+        {"modified_at", get_iso8601_now()}, 
+        {"size", 0}, 
+        {"digest", "000000000000"}, 
+        {"details", {{"format", "tflite"}, {"family", "litert"}, {"families", json::array({"litert"})}}}
+      }
+    });
+    if (emb_engine && emb_engine->IsLoaded()) {
+      models.push_back({
+        {"name", "embeddinggemma-2:latest"},
+        {"model", "embeddinggemma-2:latest"},
+        {"modified_at", get_iso8601_now()},
+        {"size", 164626432},
+        {"digest", "embeddinggemma2"},
+        {"details", {{"format", "litertlm"}, {"family", "embeddinggemma2"}, {"families", json::array({"embeddinggemma2", "embedding"})}}}
+      });
+      models.push_back({
+        {"name", "embeddinggemma2"},
+        {"model", "embeddinggemma2"},
+        {"modified_at", get_iso8601_now()},
+        {"size", 164626432},
+        {"digest", "embeddinggemma2"},
+        {"details", {{"format", "litertlm"}, {"family", "embeddinggemma2"}, {"families", json::array({"embeddinggemma2", "embedding"})}}}
+      });
+    }
+    json response = {{"models", models}};
     res.set_content(response.dump(), "application/json");
   });
 
@@ -344,10 +364,15 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
   // ==========================================
   // OpenAI 모델 목록 및 단건 조회 엔드포인트
   // ==========================================
-  auto handle_models_list = [&served_model_name](const httplib::Request &, httplib::Response &res) {
+  auto handle_models_list = [&served_model_name, emb_engine](const httplib::Request &, httplib::Response &res) {
+    json data = json::array({make_openai_model_info(served_model_name)});
+    if (emb_engine && emb_engine->IsLoaded()) {
+      data.push_back(make_openai_model_info("embeddinggemma-2:latest"));
+      data.push_back(make_openai_model_info("embeddinggemma2"));
+    }
     json response = {
       {"object", "list"},
-      {"data", json::array({make_openai_model_info(served_model_name)})}
+      {"data", data}
     };
     res.set_content(response.dump(), "application/json");
   };
@@ -364,22 +389,189 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
   svr.Get(R"(/models/(.+))", handle_single_model);
 
   // ==========================================
-  // OpenAI 임베딩 엔드포인트 (안내 에러 응답)
+  // 임베딩 엔드포인트 (OpenAI / Ollama / llama.cpp 호환)
   // ==========================================
-  auto handle_embeddings = [](const httplib::Request &, httplib::Response &res) {
-    res.status = 400;
-    json err = {
-      {"error", {
-        {"message", "This model is a text generative model and does not support embeddings."},
-        {"type", "invalid_request_error"},
-        {"param", nullptr},
-        {"code", "model_not_supported"}
-      }}
-    };
-    res.set_content(err.dump(), "application/json");
+  // 1. OpenAI 호환 (/v1/embeddings, /embeddings)
+  auto handle_openai_embeddings = [emb_engine](const httplib::Request &req, httplib::Response &res) {
+    if (!emb_engine || !emb_engine->IsLoaded()) {
+      res.status = 503;
+      json err = {
+        {"error", {
+          {"message", "Embedding engine is not loaded or available."},
+          {"type", "service_unavailable"},
+          {"param", nullptr},
+          {"code", "embedding_disabled"}
+        }}
+      };
+      res.set_content(err.dump(), "application/json");
+      return;
+    }
+
+    try {
+      auto j = json::parse(req.body);
+      std::string model = j.value("model", "embeddinggemma-2");
+      std::vector<std::string> inputs;
+      if (j.contains("input")) {
+        if (j["input"].is_string()) {
+          inputs.push_back(j["input"].get<std::string>());
+        } else if (j["input"].is_array()) {
+          for (const auto &item : j["input"]) {
+            if (item.is_string()) {
+              inputs.push_back(item.get<std::string>());
+            }
+          }
+        }
+      }
+
+      if (inputs.empty()) {
+        res.status = 400;
+        json err = {
+          {"error", {
+            {"message", "Missing or invalid 'input' parameter in embedding request."},
+            {"type", "invalid_request_error"},
+            {"param", "input"},
+            {"code", "invalid_input"}
+          }}
+        };
+        res.set_content(err.dump(), "application/json");
+        return;
+      }
+
+      json data_arr = json::array();
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        auto vec = emb_engine->ComputeEmbedding(inputs[i], true, 0);
+        data_arr.push_back({
+          {"object", "embedding"},
+          {"index", i},
+          {"embedding", vec}
+        });
+      }
+
+      json response = {
+        {"object", "list"},
+        {"data", data_arr},
+        {"model", model},
+        {"usage", {
+          {"prompt_tokens", 0},
+          {"total_tokens", 0}
+        }}
+      };
+      res.set_content(response.dump(), "application/json");
+    } catch (const std::exception &e) {
+      res.status = 400;
+      json err = {
+        {"error", {
+          {"message", std::string("Malformed JSON body: ") + e.what()},
+          {"type", "invalid_request_error"},
+          {"param", nullptr},
+          {"code", "invalid_json"}
+        }}
+      };
+      res.set_content(err.dump(), "application/json");
+    }
   };
-  svr.Post("/v1/embeddings", handle_embeddings);
-  svr.Post("/embeddings", handle_embeddings);
+  svr.Post("/v1/embeddings", handle_openai_embeddings);
+  svr.Post("/embeddings", handle_openai_embeddings);
+
+  // 2. Ollama 호환 단일 임베딩 (/api/embeddings)
+  auto handle_ollama_embeddings = [emb_engine](const httplib::Request &req, httplib::Response &res) {
+    if (!emb_engine || !emb_engine->IsLoaded()) {
+      res.status = 503;
+      res.set_content(json({{"error", "Embedding engine not available"}}).dump(), "application/json");
+      return;
+    }
+
+    try {
+      auto j = json::parse(req.body);
+      std::string prompt = "";
+      if (j.contains("prompt") && j["prompt"].is_string()) {
+        prompt = j["prompt"].get<std::string>();
+      } else if (j.contains("input") && j["input"].is_string()) {
+        prompt = j["input"].get<std::string>();
+      }
+
+      auto vec = emb_engine->ComputeEmbedding(prompt, true, 0);
+      json response = {
+        {"embedding", vec}
+      };
+      res.set_content(response.dump(), "application/json");
+    } catch (const std::exception &e) {
+      res.status = 400;
+      res.set_content(json({{"error", std::string("Invalid request: ") + e.what()}}).dump(), "application/json");
+    }
+  };
+  svr.Post("/api/embeddings", handle_ollama_embeddings);
+
+  // 3. Ollama v2 호환 배치 임베딩 (/api/embed)
+  auto handle_ollama_embed = [emb_engine](const httplib::Request &req, httplib::Response &res) {
+    if (!emb_engine || !emb_engine->IsLoaded()) {
+      res.status = 503;
+      res.set_content(json({{"error", "Embedding engine not available"}}).dump(), "application/json");
+      return;
+    }
+
+    try {
+      auto j = json::parse(req.body);
+      std::string model = j.value("model", "embeddinggemma-2");
+      std::vector<std::string> inputs;
+      if (j.contains("input")) {
+        if (j["input"].is_string()) {
+          inputs.push_back(j["input"].get<std::string>());
+        } else if (j["input"].is_array()) {
+          for (const auto &item : j["input"]) {
+            if (item.is_string()) {
+              inputs.push_back(item.get<std::string>());
+            }
+          }
+        }
+      }
+
+      json embeddings_arr = json::array();
+      for (const auto &inp : inputs) {
+        embeddings_arr.push_back(emb_engine->ComputeEmbedding(inp, true, 0));
+      }
+
+      json response = {
+        {"model", model},
+        {"embeddings", embeddings_arr}
+      };
+      res.set_content(response.dump(), "application/json");
+    } catch (const std::exception &e) {
+      res.status = 400;
+      res.set_content(json({{"error", std::string("Invalid request: ") + e.what()}}).dump(), "application/json");
+    }
+  };
+  svr.Post("/api/embed", handle_ollama_embed);
+
+  // 4. llama.cpp 네이티브 호환 (/embedding)
+  auto handle_llamacpp_embedding = [emb_engine](const httplib::Request &req, httplib::Response &res) {
+    if (!emb_engine || !emb_engine->IsLoaded()) {
+      res.status = 503;
+      res.set_content(json({{"error", "Embedding engine not available"}}).dump(), "application/json");
+      return;
+    }
+
+    try {
+      auto j = json::parse(req.body);
+      std::string content = "";
+      if (j.contains("content") && j["content"].is_string()) {
+        content = j["content"].get<std::string>();
+      } else if (j.contains("prompt") && j["prompt"].is_string()) {
+        content = j["prompt"].get<std::string>();
+      }
+
+      auto vec = emb_engine->ComputeEmbedding(content, true, 0);
+      json response = {
+        {"embedding", vec}
+      };
+      res.set_content(response.dump(), "application/json");
+    } catch (const std::exception &e) {
+      res.status = 400;
+      res.set_content(json({{"error", std::string("Invalid request: ") + e.what()}}).dump(), "application/json");
+    }
+  };
+  svr.Post("/embedding", handle_llamacpp_embedding);
+
 
   // ==========================================
   // 채팅 완료 처리 핸들러 (OpenAI 및 Ollama 공용)
