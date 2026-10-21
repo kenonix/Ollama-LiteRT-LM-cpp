@@ -76,6 +76,269 @@ public:
   }
 };
 
+// 파싱된 도구 호출 구조체
+struct ParsedToolCall {
+  size_t index = 0;
+  std::string id;
+  std::string name;
+  json arguments;
+};
+
+// 긴 도구 결과나 텍스트 메시지를 안전한 크기로 요약/절삭
+static void truncate_long_message(json &msg, int max_chars = 4000) {
+  if (!msg.is_object() || !msg.contains("content")) return;
+  if (msg["content"].is_string()) {
+    std::string text = msg["content"].get<std::string>();
+    if (text.size() > static_cast<size_t>(max_chars)) {
+      size_t head_len = max_chars * 3 / 5;
+      size_t tail_len = max_chars * 2 / 5;
+      std::string truncated = text.substr(0, head_len) + 
+                              "\n\n[... 중간 내용 " + std::to_string(text.size() - head_len - tail_len) + "자 생략됨 ...]\n\n" +
+                              text.substr(text.size() - tail_len);
+      msg["content"] = truncated;
+    }
+  }
+}
+
+// 도구 스키마(tools JSON 배열)를 Gemma 모델이 직관적으로 이해할 수 있는 압축 시스템 지침으로 변환
+static std::string format_tools_system_prompt(const json &tools) {
+  if (!tools.is_array() || tools.empty()) return "";
+
+  std::string prompt = "\n\n# Available Tools\n"
+                       "You have access to the following tools to interact with the environment, files, and system:\n<tools>\n";
+  for (const auto &tool : tools) {
+    if (!tool.is_object()) continue;
+    json fn;
+    if (tool.contains("function") && tool["function"].is_object()) {
+      fn = tool["function"];
+    } else {
+      fn = tool;
+    }
+
+    // 도구 스키마 메타데이터를 핵심 필드(이름, 설명, 파라미터 타입)로 초경량 압축하여 수천 토큰 절약
+    json compact_fn = json::object();
+    compact_fn["name"] = fn.value("name", "");
+    if (fn.contains("description") && fn["description"].is_string()) {
+      std::string desc = fn["description"].get<std::string>();
+      if (desc.size() > 140) desc = desc.substr(0, 137) + "...";
+      compact_fn["description"] = desc;
+    }
+    if (fn.contains("parameters") && fn["parameters"].is_object()) {
+      const auto &params = fn["parameters"];
+      json compact_params = json::object();
+      if (params.contains("properties") && params["properties"].is_object()) {
+        for (auto it = params["properties"].begin(); it != params["properties"].end(); ++it) {
+          std::string p_type = it.value().value("type", "string");
+          std::string p_desc = it.value().value("description", "");
+          if (p_desc.size() > 50) p_desc = p_desc.substr(0, 47) + "...";
+          if (!p_desc.empty()) {
+            compact_params[it.key()] = p_type + " (" + p_desc + ")";
+          } else {
+            compact_params[it.key()] = p_type;
+          }
+        }
+      }
+      compact_fn["parameters"] = compact_params;
+      if (params.contains("required") && params["required"].is_array()) {
+        compact_fn["required"] = params["required"];
+      }
+    }
+    prompt += compact_fn.dump() + "\n";
+  }
+  prompt += "</tools>\n\n"
+            "# Tool Calling Rules\n"
+            "1. When the user asks you to read, write, edit, search files, execute commands, or manage tasks, you MUST execute the appropriate tool instead of just describing it or outputting code blocks in chat.\n"
+            "2. To invoke a tool, output the tool call enclosed in <tool_call> tags using valid JSON formatted like this:\n"
+            "<tool_call>\n"
+            "{\"name\": \"tool_name\", \"arguments\": {\"param1\": \"val1\"}}\n"
+            "</tool_call>\n"
+            "3. You may provide a brief explanation before or after the tool call, but the tool invocation itself MUST be wrapped in <tool_call> and </tool_call> tags.\n"
+            "4. NEVER output raw markdown code blocks as a substitute for calling write or edit tools when file modification is requested.\n\n";
+  return prompt;
+}
+
+// 스트리밍 및 논스트리밍 토큰에서 <tool_call> 태그를 실시간 추출/분리하는 파서
+class ToolCallStreamParser {
+private:
+  std::string buffer_;
+  std::vector<ParsedToolCall> tool_calls_;
+  size_t call_index_ = 0;
+
+  static bool extract_tag(const std::string &buf,
+                          size_t &open_pos, size_t &open_len,
+                          size_t &close_pos, size_t &close_len) {
+    // 1) <tool_call> ... </tool_call>
+    open_pos = buf.find("<tool_call>");
+    if (open_pos != std::string::npos) {
+      open_len = 11;
+      close_pos = buf.find("</tool_call>", open_pos + open_len);
+      if (close_pos != std::string::npos) {
+        close_len = 12;
+        return true;
+      }
+      return false;
+    }
+
+    // 2) ```tool_call ... ```
+    open_pos = buf.find("```tool_call");
+    if (open_pos != std::string::npos) {
+      open_len = 12;
+      close_pos = buf.find("```", open_pos + open_len);
+      if (close_pos != std::string::npos) {
+        close_len = 3;
+        return true;
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+public:
+  struct ProcessResult {
+    std::string text_to_emit;
+    std::vector<ParsedToolCall> completed_calls;
+  };
+
+  ProcessResult process(const std::string &chunk) {
+    buffer_ += chunk;
+    ProcessResult res;
+
+    while (!buffer_.empty()) {
+      size_t open_pos = std::string::npos, open_len = 0;
+      size_t close_pos = std::string::npos, close_len = 0;
+
+      if (extract_tag(buffer_, open_pos, open_len, close_pos, close_len)) {
+        if (open_pos > 0) {
+          res.text_to_emit += buffer_.substr(0, open_pos);
+        }
+
+        std::string json_str = buffer_.substr(open_pos + open_len, close_pos - (open_pos + open_len));
+        buffer_.erase(0, close_pos + close_len);
+
+        parse_and_add_tool_call(json_str, res);
+      } else if (open_pos != std::string::npos) {
+        if (open_pos > 0) {
+          res.text_to_emit += buffer_.substr(0, open_pos);
+          buffer_.erase(0, open_pos);
+        }
+        break;
+      } else {
+        static const std::vector<std::string> potential_open_tags = {"<tool_call>", "```tool_call"};
+        size_t safe_len = buffer_.size();
+
+        for (const auto &tag : potential_open_tags) {
+          for (size_t prefix_len = 1; prefix_len < tag.size() && prefix_len <= buffer_.size(); ++prefix_len) {
+            std::string sub = buffer_.substr(buffer_.size() - prefix_len);
+            if (tag.rfind(sub, 0) == 0) {
+              if (buffer_.size() - prefix_len < safe_len) {
+                safe_len = buffer_.size() - prefix_len;
+              }
+            }
+          }
+        }
+
+        if (safe_len > 0) {
+          res.text_to_emit += buffer_.substr(0, safe_len);
+          buffer_.erase(0, safe_len);
+        }
+        break;
+      }
+    }
+
+    return res;
+  }
+
+  ProcessResult flush() {
+    ProcessResult res;
+    if (buffer_.empty()) return res;
+
+    size_t open_pos = std::string::npos, open_len = 0;
+    size_t close_pos = std::string::npos, close_len = 0;
+    if (extract_tag(buffer_, open_pos, open_len, close_pos, close_len)) {
+      if (open_pos > 0) {
+        res.text_to_emit += buffer_.substr(0, open_pos);
+      }
+      std::string json_str = buffer_.substr(open_pos + open_len, close_pos - (open_pos + open_len));
+      parse_and_add_tool_call(json_str, res);
+    } else if (open_pos != std::string::npos) {
+      if (open_pos > 0) {
+        res.text_to_emit += buffer_.substr(0, open_pos);
+      }
+      std::string json_str = buffer_.substr(open_pos + open_len);
+      if (!parse_and_add_tool_call(json_str, res)) {
+        res.text_to_emit += buffer_.substr(open_pos);
+      }
+    } else {
+      res.text_to_emit += buffer_;
+    }
+
+    buffer_.clear();
+    return res;
+  }
+
+  bool has_tool_calls() const {
+    return !tool_calls_.empty();
+  }
+
+  const std::vector<ParsedToolCall>& get_all_tool_calls() const {
+    return tool_calls_;
+  }
+
+private:
+  bool parse_and_add_tool_call(std::string str, ProcessResult &res) {
+    auto trim_str = [](std::string &s) {
+      auto start = s.find_first_not_of(" \t\n\r");
+      auto end = s.find_last_not_of(" \t\n\r");
+      if (start != std::string::npos && end != std::string::npos) {
+        s = s.substr(start, end - start + 1);
+      }
+    };
+    trim_str(str);
+    if (str.empty()) return false;
+
+    try {
+      json call_j = json::parse(str);
+      std::string fn_name = "";
+      json args = json::object();
+
+      if (call_j.contains("name") && call_j["name"].is_string()) {
+        fn_name = call_j["name"].get<std::string>();
+      } else if (call_j.contains("function") && call_j["function"].is_object() && call_j["function"].contains("name")) {
+        fn_name = call_j["function"]["name"].get<std::string>();
+      }
+
+      if (call_j.contains("arguments")) {
+        if (call_j["arguments"].is_object()) {
+          args = call_j["arguments"];
+        } else if (call_j["arguments"].is_string()) {
+          try {
+            args = json::parse(call_j["arguments"].get<std::string>());
+          } catch (...) {
+            args = {{"raw", call_j["arguments"].get<std::string>()}};
+          }
+        }
+      } else if (call_j.contains("parameters") && call_j["parameters"].is_object()) {
+        args = call_j["parameters"];
+      }
+
+      if (!fn_name.empty()) {
+        ParsedToolCall tc;
+        tc.index = call_index_++;
+        tc.id = generate_random_id("call_") + std::to_string(tc.index);
+        tc.name = fn_name;
+        tc.arguments = args;
+        res.completed_calls.push_back(tc);
+        tool_calls_.push_back(tc);
+        return true;
+      }
+    } catch (...) {
+      // JSON 파싱 실패
+    }
+    return false;
+  }
+};
+
 // 요청 메시지를 LiteRT-LM 엔진이 지원하는 내부 JSON 형식으로 변환 (Base64 / URL 이미지 처리 포함)
 static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFilesCleanup> temp_files) {
   json transformed = msg;
@@ -83,8 +346,39 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
   // OpenAI developer role을 system과 동일하게 취급 (LiteRT-LM 내부 처리용)
   if (role == "developer") {
     role = "system";
+  } else if (role == "tool") {
+    // LiteRT-LM / Gemma는 tool role을 지원하지 않으므로 user 역할의 [Tool Result] 메시지로 변환
+    role = "user";
+    std::string tool_name = msg.value("name", "");
+    std::string content_str = "";
+    if (msg.contains("content")) {
+      if (msg["content"].is_string()) {
+        content_str = msg["content"].get<std::string>();
+      } else {
+        content_str = msg["content"].dump();
+      }
+    }
+    std::string header = "[Tool Result" + (tool_name.empty() ? "" : " for " + tool_name) + "]:\n";
+    transformed["role"] = "user";
+    transformed["content"] = header + content_str;
+    return transformed;
   }
   transformed["role"] = role;
+
+  // assistant 역할에서 content가 비어있고 tool_calls가 있는 경우 <tool_call> 태그 텍스트로 복원
+  if (role == "assistant") {
+    bool has_text = msg.contains("content") && msg["content"].is_string() && !msg["content"].get<std::string>().empty();
+    if (!has_text && msg.contains("tool_calls") && msg["tool_calls"].is_array() && !msg["tool_calls"].empty()) {
+      std::string calls_text = "";
+      for (const auto &tc : msg["tool_calls"]) {
+        if (tc.contains("function") && tc["function"].is_object()) {
+          calls_text += "<tool_call>\n" + tc["function"].dump() + "\n</tool_call>\n";
+        }
+      }
+      transformed["content"] = calls_text;
+      return transformed;
+    }
+  }
 
   // 1. Ollama "images" 필드 (Base64 배열) 처리
   if (msg.contains("images") && msg["images"].is_array() && !msg["images"].empty()) {
@@ -141,6 +435,11 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
     }
     transformed["content"] = content_arr;
     return transformed;
+  }
+
+  // content가 null이거나 누락된 경우 빈 문자열로 안전 보장
+  if (!transformed.contains("content") || transformed["content"].is_null()) {
+    transformed["content"] = "";
   }
 
   return transformed;
@@ -579,6 +878,11 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
   auto handle_chat_completion = [&app, &served_model_name](const httplib::Request &req, httplib::Response &res, bool is_ollama) {
     try {
       auto j_req = json::parse(req.body);
+      std::cout << "[CHAT REQUEST] model=" << j_req.value("model", "")
+                << " stream=" << (j_req.contains("stream") ? (j_req["stream"].get<bool>() ? "true" : "false") : (is_ollama ? "true" : "false"))
+                << " msg_count=" << (j_req.contains("messages") && j_req["messages"].is_array() ? j_req["messages"].size() : 0)
+                << " has_tools=" << (j_req.contains("tools") && j_req["tools"].is_array() && !j_req["tools"].empty() ? "true" : "false")
+                << std::endl;
       // Ollama 스펙상 stream 생략 시 기본값은 true, OpenAI는 false
       bool want_stream = j_req.contains("stream") ? j_req["stream"].get<bool>() : is_ollama;
 
@@ -627,11 +931,98 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         sys_msg = DEFAULT_SYSTEM_PROMPT;
       }
 
+      // 도구 정의(tools)가 요청에 포함된 경우 Gemma용 툴 시스템 지침 자동 주입
+      if (j_req.contains("tools") && j_req["tools"].is_array() && !j_req["tools"].empty()) {
+        sys_msg += format_tools_system_prompt(j_req["tools"]);
+      }
+
       if (!history_arr.empty()) {
         current_msg_j = history_arr.back();
         history_arr.erase(history_arr.end() - 1);
       } else {
         current_msg_j = {{"role", "user"}, {"content", ""}};
+      }
+
+      // 1. 현재 메시지(도구 결과 등)가 비대할 경우 안전하게 중간 생략 (최대 4000자)
+      truncate_long_message(current_msg_j, 4000);
+
+      // 컨텍스트 슬라이딩 윈도우 (엔진 max_tokens 한도 초과 방지)
+      int max_engine_tokens = app.GetMaxTokens();
+      // 모델 응답 생성 버퍼(최소 1536 토큰) 및 오버헤드(300 토큰)를 제외한 안전 한도 설정
+      int target_limit = std::max(2048, max_engine_tokens - 1836);
+
+      std::string curr_text = "";
+      if (current_msg_j.contains("content")) {
+        if (current_msg_j["content"].is_string()) curr_text = current_msg_j["content"].get<std::string>();
+        else curr_text = current_msg_j["content"].dump();
+      }
+      int sys_tokens = app.CountTokens(sys_msg);
+      int curr_tokens = app.CountTokens(curr_text);
+      int base_tokens = sys_tokens + curr_tokens + 50;
+
+      int history_budget = target_limit - base_tokens;
+      if (history_budget < 0) {
+        history_arr.clear();
+
+        // 비상 방어선 (Hard Clamping): 히스토리를 전부 비워도 시스템 지침 + 현재 메시지가 한도를 넘는 경우
+        if (base_tokens > target_limit) {
+          std::cout << "[컨텍스트 하드 클램핑] 시스템 지침(" << sys_tokens << ")과 현재 메시지(" 
+                    << curr_tokens << ")가 안전 한도(" << target_limit << ")를 초과하여 강제 절삭합니다." << std::endl;
+          // 현재 메시지를 더 타이트하게 2000자로 절삭
+          truncate_long_message(current_msg_j, 2000);
+          if (current_msg_j["content"].is_string()) curr_text = current_msg_j["content"].get<std::string>();
+          else curr_text = current_msg_j["content"].dump();
+          curr_tokens = app.CountTokens(curr_text);
+
+          // 그래도 초과 시 시스템 지침의 후반부를 안전하게 절삭
+          int allowed_sys_tokens = target_limit - curr_tokens - 100;
+          if (allowed_sys_tokens < 1000) allowed_sys_tokens = 1000;
+          if (sys_tokens > allowed_sys_tokens) {
+            size_t cut_len = (sys_msg.size() * allowed_sys_tokens) / sys_tokens;
+            if (cut_len < sys_msg.size()) {
+              sys_msg = sys_msg.substr(0, cut_len) + "\n\n[... 프롬프트 일부 절삭됨 ...]";
+              sys_tokens = app.CountTokens(sys_msg);
+            }
+          }
+          base_tokens = sys_tokens + curr_tokens + 50;
+        }
+      } else if (!history_arr.empty()) {
+        json trimmed_history = json::array();
+        int accumulated_tokens = 0;
+        int dropped_count = 0;
+
+        // 최신 메시지(뒤)부터 역순으로 탐색하여 예산 내에 들어오는 메시지만 보존
+        for (int idx = static_cast<int>(history_arr.size()) - 1; idx >= 0; --idx) {
+          const auto &item = history_arr[idx];
+          std::string item_text = "";
+          if (item.contains("content")) {
+            if (item["content"].is_string()) item_text = item["content"].get<std::string>();
+            else item_text = item["content"].dump();
+          }
+          int item_tokens = app.CountTokens(item_text) + 20;
+
+          if (accumulated_tokens + item_tokens <= history_budget) {
+            trimmed_history.insert(trimmed_history.begin(), item);
+            accumulated_tokens += item_tokens;
+          } else {
+            dropped_count = idx + 1;
+            break;
+          }
+        }
+
+        if (dropped_count > 0) {
+          std::cout << "[컨텍스트 슬라이딩 윈도우] 오래된 메시지 " << dropped_count
+                    << "개를 트리밍하여 토큰 초과를 방지했습니다. (예상 입력: "
+                    << (base_tokens + accumulated_tokens) << " / " << max_engine_tokens << " 토큰)"
+                    << std::endl;
+        }
+
+        // 트리밍 후 만약 첫 메시지가 'assistant'이면 대화 턴 일관성을 위해 첫 'user' 메시지 이전 고아 메시지 정리
+        while (!trimmed_history.empty() && trimmed_history.front().value("role", "") != "user") {
+          trimmed_history.erase(trimmed_history.begin());
+        }
+
+        history_arr = std::move(trimmed_history);
       }
 
       // LiteRT-LM / Gemma 엔진은 시스템 토큰이 없으므로 첫 번째 user 메시지 앞단에 시스템 프롬프트 병합
@@ -672,64 +1063,136 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         auto accumulated_text = std::make_shared<std::string>();
         auto is_first_chunk = std::make_shared<bool>(true);
         auto utf8_asm = std::make_shared<Utf8StreamReassembler>();
+        auto tool_parser = std::make_shared<ToolCallStreamParser>();
 
         std::thread([&app, sys_msg, history_json_str, current_msg_str, served_model_name, is_ollama,
                      sink_ctx, cancelled, temp_files, gen_opts, chat_id, created_ts,
-                     prompt_tokens, include_usage, accumulated_text, is_first_chunk, utf8_asm]() {
+                     prompt_tokens, include_usage, accumulated_text, is_first_chunk, utf8_asm, tool_parser]() {
           app.StreamForServer(sys_msg, history_json_str, current_msg_str,
             // 청크 수신 콜백
-            [served_model_name, is_ollama, sink_ctx, chat_id, created_ts, accumulated_text, is_first_chunk, utf8_asm](const std::string &chunk) {
+            [served_model_name, is_ollama, sink_ctx, chat_id, created_ts, accumulated_text, is_first_chunk, utf8_asm, tool_parser](const std::string &chunk) {
               std::string clean_chunk = utf8_asm->process(chunk);
               if (clean_chunk.empty()) return;
 
-              json chunk_j;
-              if (is_ollama) {
-                chunk_j = {
-                  {"model", served_model_name},
-                  {"created_at", get_iso8601_now()},
-                  {"message", {{"role", "assistant"}, {"content", clean_chunk}}},
-                  {"done", false}
-                };
-              } else {
-                json delta_obj = json::object();
-                if (*is_first_chunk) {
-                  delta_obj["role"] = "assistant";
-                  *is_first_chunk = false;
-                }
-                delta_obj["content"] = clean_chunk;
+              auto p_res = tool_parser->process(clean_chunk);
 
-                chunk_j = {
-                  {"id", chat_id},
-                  {"object", "chat.completion.chunk"},
-                  {"created", created_ts},
-                  {"model", served_model_name},
-                  {"system_fingerprint", "fp_litert_lm"},
-                  {"choices", json::array({
-                    {
-                      {"index", 0},
-                      {"delta", delta_obj},
-                      {"logprobs", nullptr},
-                      {"finish_reason", nullptr}
-                    }
-                  })}
-                };
-                *accumulated_text += clean_chunk;
-              }
-              std::lock_guard<std::mutex> lock(sink_ctx->mtx);
-              sink_ctx->chunks.push(is_ollama ? chunk_j.dump() + "\n" : "data: " + chunk_j.dump() + "\n\n");
-              sink_ctx->cv.notify_one();
-            },
-            // 완료 콜백
-            [&app, served_model_name, is_ollama, sink_ctx, chat_id, created_ts,
-             prompt_tokens, include_usage, accumulated_text, utf8_asm, is_first_chunk]() {
-              std::lock_guard<std::mutex> lock(sink_ctx->mtx);
-              std::string leftover = utf8_asm->flush();
-              if (!leftover.empty()) {
+              // 1. 일반 텍스트 청크 방출
+              if (!p_res.text_to_emit.empty()) {
+                std::string text_chunk = p_res.text_to_emit;
+                *accumulated_text += text_chunk;
+
                 if (is_ollama) {
                   json chunk_j = {
                     {"model", served_model_name},
                     {"created_at", get_iso8601_now()},
-                    {"message", {{"role", "assistant"}, {"content", leftover}}},
+                    {"message", {{"role", "assistant"}, {"content", text_chunk}}},
+                    {"done", false}
+                  };
+                  std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+                  sink_ctx->chunks.push(chunk_j.dump() + "\n");
+                  sink_ctx->cv.notify_one();
+                } else {
+                  json delta_obj = json::object();
+                  if (*is_first_chunk) {
+                    delta_obj["role"] = "assistant";
+                    *is_first_chunk = false;
+                  }
+                  delta_obj["content"] = text_chunk;
+
+                  json chunk_j = {
+                    {"id", chat_id},
+                    {"object", "chat.completion.chunk"},
+                    {"created", created_ts},
+                    {"model", served_model_name},
+                    {"system_fingerprint", "fp_litert_lm"},
+                    {"choices", json::array({
+                      {
+                        {"index", 0},
+                        {"delta", delta_obj},
+                        {"logprobs", nullptr},
+                        {"finish_reason", nullptr}
+                      }
+                    })}
+                  };
+                  std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+                  sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
+                  sink_ctx->cv.notify_one();
+                }
+              }
+
+              // 2. 완성된 Tool Call 청크 방출
+              for (const auto &tc : p_res.completed_calls) {
+                if (is_ollama) {
+                  json chunk_j = {
+                    {"model", served_model_name},
+                    {"created_at", get_iso8601_now()},
+                    {"message", {
+                      {"role", "assistant"},
+                      {"content", ""},
+                      {"tool_calls", json::array({
+                        {{"function", {{"name", tc.name}, {"arguments", tc.arguments}}}}
+                      })}
+                    }},
+                    {"done", false}
+                  };
+                  std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+                  sink_ctx->chunks.push(chunk_j.dump() + "\n");
+                  sink_ctx->cv.notify_one();
+                } else {
+                  json delta_obj = json::object();
+                  if (*is_first_chunk) {
+                    delta_obj["role"] = "assistant";
+                    *is_first_chunk = false;
+                  }
+                  delta_obj["tool_calls"] = json::array({
+                    {
+                      {"index", tc.index},
+                      {"id", tc.id},
+                      {"type", "function"},
+                      {"function", {
+                        {"name", tc.name},
+                        {"arguments", tc.arguments.dump()}
+                      }}
+                    }
+                  });
+
+                  json chunk_j = {
+                    {"id", chat_id},
+                    {"object", "chat.completion.chunk"},
+                    {"created", created_ts},
+                    {"model", served_model_name},
+                    {"system_fingerprint", "fp_litert_lm"},
+                    {"choices", json::array({
+                      {
+                        {"index", 0},
+                        {"delta", delta_obj},
+                        {"logprobs", nullptr},
+                        {"finish_reason", nullptr}
+                      }
+                    })}
+                  };
+                  std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+                  sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
+                  sink_ctx->cv.notify_one();
+                }
+              }
+            },
+            // 완료 콜백
+            [&app, served_model_name, is_ollama, sink_ctx, chat_id, created_ts,
+             prompt_tokens, include_usage, accumulated_text, utf8_asm, is_first_chunk, tool_parser]() {
+              std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+              std::string leftover = utf8_asm->flush();
+              auto p_res = tool_parser->process(leftover);
+              auto p_flush = tool_parser->flush();
+              std::string final_text = p_res.text_to_emit + p_flush.text_to_emit;
+
+              if (!final_text.empty()) {
+                *accumulated_text += final_text;
+                if (is_ollama) {
+                  json chunk_j = {
+                    {"model", served_model_name},
+                    {"created_at", get_iso8601_now()},
+                    {"message", {{"role", "assistant"}, {"content", final_text}}},
                     {"done", false}
                   };
                   sink_ctx->chunks.push(chunk_j.dump() + "\n");
@@ -739,7 +1202,7 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                     delta_obj["role"] = "assistant";
                     *is_first_chunk = false;
                   }
-                  delta_obj["content"] = leftover;
+                  delta_obj["content"] = final_text;
                   json chunk_j = {
                     {"id", chat_id},
                     {"object", "chat.completion.chunk"},
@@ -756,8 +1219,85 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                     })}
                   };
                   sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
-                  *accumulated_text += leftover;
                 }
+              }
+
+              // 잔여 버퍼에서 검출된 Tool Call 방출
+              std::vector<ParsedToolCall> final_calls = p_res.completed_calls;
+              final_calls.insert(final_calls.end(), p_flush.completed_calls.begin(), p_flush.completed_calls.end());
+              for (const auto &tc : final_calls) {
+                if (is_ollama) {
+                  json chunk_j = {
+                    {"model", served_model_name},
+                    {"created_at", get_iso8601_now()},
+                    {"message", {
+                      {"role", "assistant"},
+                      {"content", ""},
+                      {"tool_calls", json::array({
+                        {{"function", {{"name", tc.name}, {"arguments", tc.arguments}}}}
+                      })}
+                    }},
+                    {"done", false}
+                  };
+                  sink_ctx->chunks.push(chunk_j.dump() + "\n");
+                } else {
+                  json delta_obj = json::object();
+                  if (*is_first_chunk) {
+                    delta_obj["role"] = "assistant";
+                    *is_first_chunk = false;
+                  }
+                  delta_obj["tool_calls"] = json::array({
+                    {
+                      {"index", tc.index},
+                      {"id", tc.id},
+                      {"type", "function"},
+                      {"function", {
+                        {"name", tc.name},
+                        {"arguments", tc.arguments.dump()}
+                      }}
+                    }
+                  });
+                  json chunk_j = {
+                    {"id", chat_id},
+                    {"object", "chat.completion.chunk"},
+                    {"created", created_ts},
+                    {"model", served_model_name},
+                    {"system_fingerprint", "fp_litert_lm"},
+                    {"choices", json::array({
+                      {
+                        {"index", 0},
+                        {"delta", delta_obj},
+                        {"logprobs", nullptr},
+                        {"finish_reason", nullptr}
+                      }
+                    })}
+                  };
+                  sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
+                }
+              }
+
+              bool has_tools_called = tool_parser->has_tool_calls();
+              std::string finish_reason = has_tools_called ? "tool_calls" : "stop";
+
+              // OpenAI 모드에서 첫 청크가 아직 방출되지 않은 경우(내용이 빈 채로 종료된 경우), 빈 content 델타를 명시적으로 방출
+              if (!is_ollama && *is_first_chunk && !has_tools_called) {
+                json init_j = {
+                  {"id", chat_id},
+                  {"object", "chat.completion.chunk"},
+                  {"created", created_ts},
+                  {"model", served_model_name},
+                  {"system_fingerprint", "fp_litert_lm"},
+                  {"choices", json::array({
+                    {
+                      {"index", 0},
+                      {"delta", {{"role", "assistant"}, {"content", ""}}},
+                      {"logprobs", nullptr},
+                      {"finish_reason", nullptr}
+                    }
+                  })}
+                };
+                sink_ctx->chunks.push("data: " + init_j.dump() + "\n\n");
+                *is_first_chunk = false;
               }
 
               if (is_ollama) {
@@ -765,12 +1305,11 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                   {"model", served_model_name},
                   {"created_at", get_iso8601_now()},
                   {"message", {{"role", "assistant"}, {"content", ""}}},
-                  {"done_reason", "stop"},
+                  {"done_reason", finish_reason},
                   {"done", true}
                 };
                 sink_ctx->chunks.push(done_j.dump() + "\n");
               } else {
-                // OpenAI 스트리밍 종료 청크: finish_reason="stop"
                 json stop_j = {
                   {"id", chat_id},
                   {"object", "chat.completion.chunk"},
@@ -782,13 +1321,12 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                       {"index", 0},
                       {"delta", json::object()},
                       {"logprobs", nullptr},
-                      {"finish_reason", "stop"}
+                      {"finish_reason", finish_reason}
                     }
                   })}
                 };
                 sink_ctx->chunks.push("data: " + stop_j.dump() + "\n\n");
 
-                // stream_options.include_usage가 설정된 경우 usage 청크 전송
                 if (include_usage) {
                   int comp_tokens = app.CountTokens(*accumulated_text);
                   json usage_j = {
@@ -807,15 +1345,41 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                   sink_ctx->chunks.push("data: " + usage_j.dump() + "\n\n");
                 }
 
-                // 스트림 완료 신호
                 sink_ctx->chunks.push("data: [DONE]\n\n");
               }
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
             // 에러 콜백
-            [sink_ctx](const std::string &) { 
+            [sink_ctx, is_ollama, chat_id, created_ts, served_model_name](const std::string &err_msg) { 
+              std::cerr << "[SERVER STREAM ERROR] " << err_msg << std::endl;
               std::lock_guard<std::mutex> lock(sink_ctx->mtx); 
+              if (is_ollama) {
+                json err_j = {
+                  {"model", served_model_name},
+                  {"error", err_msg},
+                  {"done", true}
+                };
+                sink_ctx->chunks.push(err_j.dump() + "\n");
+              } else {
+                json err_j = {
+                  {"id", chat_id},
+                  {"object", "chat.completion.chunk"},
+                  {"created", created_ts},
+                  {"model", served_model_name},
+                  {"system_fingerprint", "fp_litert_lm"},
+                  {"choices", json::array({
+                    {
+                      {"index", 0},
+                      {"delta", {{"role", "assistant"}, {"content", "[오류 발생: " + err_msg + "]"}}},
+                      {"logprobs", nullptr},
+                      {"finish_reason", "stop"}
+                    }
+                  })}
+                };
+                sink_ctx->chunks.push("data: " + err_j.dump() + "\n\n");
+                sink_ctx->chunks.push("data: [DONE]\n\n");
+              }
               sink_ctx->done = true; 
               sink_ctx->cv.notify_one(); 
             },
@@ -845,18 +1409,47 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       } 
       // 일반 동기(비스트리밍) 응답 처리 루틴
       else {
-        std::string output = app.GenerateForServer(sys_msg, history_json_str, current_msg_str, gen_opts);
+        std::string raw_output = app.GenerateForServer(sys_msg, history_json_str, current_msg_str, gen_opts);
+        ToolCallStreamParser parser;
+        auto p_res = parser.process(raw_output);
+        auto p_flush = parser.flush();
+        std::string clean_text = p_res.text_to_emit + p_flush.text_to_emit;
+        bool has_tools_called = parser.has_tool_calls();
+        std::string finish_reason = has_tools_called ? "tool_calls" : "stop";
+
         json api_res;
         if (is_ollama) {
+          json msg_obj = {{"role", "assistant"}, {"content", clean_text}};
+          if (has_tools_called) {
+            json tc_arr = json::array();
+            for (const auto &tc : parser.get_all_tool_calls()) {
+              tc_arr.push_back({{"function", {{"name", tc.name}, {"arguments", tc.arguments}}}});
+            }
+            msg_obj["tool_calls"] = tc_arr;
+          }
+
           api_res = {
             {"model", served_model_name},
             {"created_at", get_iso8601_now()},
-            {"message", {{"role", "assistant"}, {"content", output}}},
-            {"done_reason", "stop"},
+            {"message", msg_obj},
+            {"done_reason", finish_reason},
             {"done", true}
           };
         } else {
-          int completion_tokens = app.CountTokens(output);
+          int completion_tokens = app.CountTokens(clean_text);
+          json msg_obj = {{"role", "assistant"}, {"content", clean_text}};
+          if (has_tools_called) {
+            json tc_arr = json::array();
+            for (const auto &tc : parser.get_all_tool_calls()) {
+              tc_arr.push_back({
+                {"id", tc.id},
+                {"type", "function"},
+                {"function", {{"name", tc.name}, {"arguments", tc.arguments.dump()}}}
+              });
+            }
+            msg_obj["tool_calls"] = tc_arr;
+          }
+
           api_res = {
             {"id", chat_id},
             {"object", "chat.completion"},
@@ -866,12 +1459,9 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
             {"choices", json::array({
               {
                 {"index", 0},
-                {"message", {
-                  {"role", "assistant"},
-                  {"content", output}
-                }},
+                {"message", msg_obj},
                 {"logprobs", nullptr},
-                {"finish_reason", "stop"}
+                {"finish_reason", finish_reason}
               }
             })},
             {"usage", {

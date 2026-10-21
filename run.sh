@@ -1,7 +1,7 @@
 #!/bin/bash
 MODEL="${1:-./gemma-4-12B-it.litertlm}"
 PORT="${PORT:-11434}"
-MAX_TOKENS="${MAX_TOKENS:-10240}"
+MAX_TOKENS="${MAX_TOKENS:-16384}"
 
 # 포트 충돌 사전 감지
 if ss -tulpn 2>/dev/null | grep -q ":${PORT}[[:space:]]"; then

@@ -50,6 +50,9 @@ public:
   // 소멸자: 엔진 자원 해제
   ~MultimodalCliApp();
 
+  // 최대 토큰 한도 조회
+  int GetMaxTokens() const { return max_tokens_; }
+
   // 텍스트 토큰 수 계산 (정확한 사용량 산출)
   int CountTokens(const std::string &text);
 
