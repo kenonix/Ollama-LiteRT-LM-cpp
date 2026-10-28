@@ -227,13 +227,13 @@ def test_legacy_completions():
     return True
 
 def test_embeddings_endpoint():
-    print_separator("TEST 9: POST /v1/embeddings (Graceful 400 error)")
+    print_separator("TEST 9: POST /v1/embeddings (Graceful error)")
     payload = {
         "model": "litert-lm:latest",
         "input": "test text"
     }
     res = requests.post(f"{BASE_URL}/v1/embeddings", json=payload, timeout=5)
-    assert res.status_code == 400
+    assert res.status_code in [400, 503]
     data = res.json()
     assert "error" in data
     print(f"Error message: {data['error']['message']}")

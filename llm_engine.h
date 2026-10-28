@@ -19,7 +19,7 @@ struct GenerationOptions {
   float temperature = 0.7f;
   float top_p = 0.95f;
   int top_k = 40;
-  int max_tokens = 2048;
+  int max_tokens = -1;
   int seed = -1;
   float frequency_penalty = 0.0f;
   float presence_penalty = 0.0f;
@@ -43,6 +43,7 @@ private:
   std::string system_prompt_;        // 활성화된 시스템 프롬프트
   int max_tokens_ = 2048;            // 최대 토큰 수
   std::recursive_mutex engine_mutex_; // 엔진 호출 직렬화 뮤텍스 (재귀적 잠금 지원)
+  std::mutex tokenizer_mutex_;        // 토크나이저 전용 뮤텍스 (생성 중 블로킹 방지)
 
 public:
   // 생성자: 모델 경로와 시스템 프롬프트를 사용하여 엔진 초기화

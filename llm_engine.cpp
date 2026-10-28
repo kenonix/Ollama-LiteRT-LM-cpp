@@ -28,8 +28,12 @@ std::string extract_text_from_chunk(const char *chunk) {
         return result;
       }
     }
+    // content가 없는 JSON 객체(예: channels/thought 등)는 빈 문자열 반환
+    if (j.is_object()) {
+      return "";
+    }
   } catch (...) {}
-  // 파싱 실패 시 원본 문자열 반환
+  // JSON이 아닌 순수 문자열 청크인 경우 원본 반환
   return std::string(chunk);
 }
 
@@ -83,22 +87,59 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   if (!engine_)
     throw std::runtime_error("엔진 생성 실패");
 
+  // 첫 요청 시 30초 이상 걸리는 비전/샘플러/WebGPU 셰이더 지연을 방지하기 위해 시작 시 1토큰 워밍업 수행
+  std::cout << "[시스템] GPU 파이프라인 및 세션 워밍업 중..." << std::endl;
+  {
+    LiteRtLmSessionConfig *warmup_sc = litert_lm_session_config_create();
+    if (warmup_sc) {
+      litert_lm_session_config_set_max_output_tokens(warmup_sc, 1);
+    }
+    LiteRtLmConversationConfig *warmup_cc = litert_lm_conversation_config_create();
+    if (warmup_cc) {
+      if (warmup_sc) {
+        litert_lm_conversation_config_set_session_config(warmup_cc, warmup_sc);
+      }
+      LiteRtLmThinkingConfig *t_cfg = litert_lm_thinking_config_create();
+      if (t_cfg) {
+        litert_lm_thinking_config_set_enable_thinking(t_cfg, false);
+        litert_lm_conversation_config_set_thinking_config(warmup_cc, t_cfg);
+        litert_lm_thinking_config_delete(t_cfg);
+      }
+    }
+    if (warmup_sc) litert_lm_session_config_delete(warmup_sc);
+
+    LiteRtLmConversation *warmup_conv = litert_lm_conversation_create(engine_, warmup_cc);
+    if (warmup_cc) litert_lm_conversation_config_delete(warmup_cc);
+    if (warmup_conv) {
+      LiteRtLmConversationOptionalArgs *warmup_opt = litert_lm_conversation_optional_args_create();
+      if (warmup_opt) {
+        litert_lm_conversation_optional_args_set_max_output_tokens(warmup_opt, 1);
+      }
+      LiteRtLmJsonResponse *w_res = litert_lm_conversation_send_message(
+          warmup_conv, "{\"role\":\"user\",\"content\":\"hi\"}", nullptr, warmup_opt);
+      if (w_res) litert_lm_json_response_delete(w_res);
+      if (warmup_opt) litert_lm_conversation_optional_args_delete(warmup_opt);
+      litert_lm_conversation_delete(warmup_conv);
+    }
+  }
+
   std::cout << "[시스템] 준비 완료!" << std::endl;
 }
 
 // 소멸자: LiteRT-LM 엔진 자원 해제
 MultimodalCliApp::~MultimodalCliApp() {
   std::lock_guard<std::recursive_mutex> lock(engine_mutex_);
+  std::lock_guard<std::mutex> tok_lock(tokenizer_mutex_);
   if (engine_) {
     litert_lm_engine_delete(engine_);
     engine_ = nullptr;
   }
 }
 
-// 텍스트 토큰 수 계산 (LiteRT-LM 엔진 토크나이저 활용)
+// 텍스트 토큰 수 계산 (LiteRT-LM 엔진 토크나이저 활용, 추론 락과 분리하여 블로킹 방지)
 int MultimodalCliApp::CountTokens(const std::string &text) {
   if (text.empty()) return 0;
-  std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
+  std::lock_guard<std::mutex> tok_lock(tokenizer_mutex_);
   if (!engine_) return std::max(1, static_cast<int>(text.size() / 3));
 
   LiteRtLmTokenizeResult *res = litert_lm_engine_tokenize(engine_, text.c_str());
@@ -118,10 +159,10 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
   std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
 
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
+  int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
 
   LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
   if (session_config) {
-    int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
     litert_lm_session_config_set_max_output_tokens(session_config, max_tok);
 
     LiteRtLmSamplerType s_type = (opts.temperature <= 0.001f) ? kLiteRtLmSamplerTypeGreedy : kLiteRtLmSamplerTypeTopP;
@@ -138,7 +179,7 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
     }
   }
 
-  // 대화 기록을 포함하여 세션 구성
+  // 대화 기록을 포함하여 세션 구성 (불필요한 thought 채널 생성 비활성화로 응답 속도 및 KV 캐시 절약)
   LiteRtLmConversationConfig *conv_config = litert_lm_conversation_config_create();
   if (conv_config) {
     if (session_config) {
@@ -147,6 +188,13 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
     litert_lm_conversation_config_set_system_message(conv_config, sys_json.c_str());
     if (!history_json.empty()) {
       litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
+    }
+    litert_lm_conversation_config_set_filter_channel_content_from_kv_cache(conv_config, true);
+    LiteRtLmThinkingConfig *thinking_cfg = litert_lm_thinking_config_create();
+    if (thinking_cfg) {
+      litert_lm_thinking_config_set_enable_thinking(thinking_cfg, false);
+      litert_lm_conversation_config_set_thinking_config(conv_config, thinking_cfg);
+      litert_lm_thinking_config_delete(thinking_cfg);
     }
   }
   if (session_config)
@@ -161,6 +209,13 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
 
   LiteRtLmConversationOptionalArgs *opt_args = litert_lm_conversation_optional_args_create();
   if (opt_args) {
+    litert_lm_conversation_optional_args_set_max_output_tokens(opt_args, max_tok);
+    LiteRtLmThinkingConfig *thinking_cfg = litert_lm_thinking_config_create();
+    if (thinking_cfg) {
+      litert_lm_thinking_config_set_enable_thinking(thinking_cfg, false);
+      litert_lm_conversation_optional_args_set_thinking_config(opt_args, thinking_cfg);
+      litert_lm_thinking_config_delete(thinking_cfg);
+    }
     if (opts.frequency_penalty != 0.0f || opts.presence_penalty != 0.0f) {
       LiteRtLmRepetitionPenaltyConfig *rep_cfg = litert_lm_repetition_penalty_config_create();
       if (rep_cfg) {
@@ -183,26 +238,17 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
   if (response_obj) {
     const char *res_text = litert_lm_json_response_get_string(response_obj);
     if (res_text) {
-      try {
-        auto res_j = json::parse(res_text);
-        if (res_j.contains("content")) {
-          if (res_j["content"].is_string()) {
-            out_text = res_j["content"].get<std::string>();
-          } else if (res_j["content"].is_array() && !res_j["content"].empty() && res_j["content"][0].contains("text")) {
-            out_text = res_j["content"][0]["text"].get<std::string>();
-          }
-        } else {
-          out_text = res_text;
-        }
-      } catch (...) {
-        out_text = res_text;
-      }
+      out_text = extract_text_from_chunk(res_text);
     }
     litert_lm_json_response_delete(response_obj);
   }
+
+  int total_kv_tokens = litert_lm_conversation_get_token_count(conversation);
   litert_lm_conversation_delete(conversation);
 
   // Stop 시퀀스 자르기 처리
+  bool stop_triggered = false;
+  std::string matched_stop = "";
   if (!opts.stop.empty()) {
     size_t earliest = std::string::npos;
     for (const auto &sw : opts.stop) {
@@ -210,11 +256,32 @@ std::string MultimodalCliApp::GenerateForServer(const std::string &system_msg_st
       size_t pos = out_text.find(sw);
       if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
         earliest = pos;
+        matched_stop = sw;
       }
     }
     if (earliest != std::string::npos) {
       out_text = out_text.substr(0, earliest);
+      stop_triggered = true;
     }
+  }
+
+  int out_tokens = CountTokens(out_text);
+  if (total_kv_tokens >= max_tokens_) {
+    std::cerr << "[경고] KV 캐시 최대 토큰 한도 도달! (KV 사용량: " << total_kv_tokens
+              << " / " << max_tokens_ << " 토큰, 출력: " << out_tokens
+              << " 토큰) -> 문장이 중간에 잘렸을 수 있습니다." << std::endl;
+  } else if (opts.max_tokens > 0 && out_tokens >= opts.max_tokens) {
+    std::cerr << "[경고] 요청된 max_tokens(" << opts.max_tokens
+              << ") 한도 도달! (출력: " << out_tokens << " 토큰, KV 사용량: "
+              << total_kv_tokens << " / " << max_tokens_ << " 토큰)" << std::endl;
+  } else if (stop_triggered) {
+    std::cout << "[생성 완료] Stop 시퀀스(\"" << matched_stop << "\") 도달 (출력: "
+              << out_tokens << " 토큰, KV 사용량: " << total_kv_tokens
+              << " / " << max_tokens_ << " 토큰)" << std::endl;
+  } else {
+    std::cout << "[생성 완료] 정상 종료 (출력: " << out_tokens
+              << " 토큰, KV 사용량: " << total_kv_tokens << " / " << max_tokens_
+              << " 토큰)" << std::endl;
   }
 
   return out_text;
@@ -232,10 +299,10 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
   std::lock_guard<std::recursive_mutex> engine_lock(engine_mutex_);
 
   std::string sys_json = json({{"role", "system"}, {"content", system_msg_str}}).dump();
+  int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
 
   LiteRtLmSessionConfig *session_config = litert_lm_session_config_create();
   if (session_config) {
-    int max_tok = (opts.max_tokens > 0) ? opts.max_tokens : max_tokens_;
     litert_lm_session_config_set_max_output_tokens(session_config, max_tok);
 
     LiteRtLmSamplerType s_type = (opts.temperature <= 0.001f) ? kLiteRtLmSamplerTypeGreedy : kLiteRtLmSamplerTypeTopP;
@@ -261,6 +328,13 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
     if (!history_json.empty()) {
       litert_lm_conversation_config_set_messages(conv_config, history_json.c_str());
     }
+    litert_lm_conversation_config_set_filter_channel_content_from_kv_cache(conv_config, true);
+    LiteRtLmThinkingConfig *thinking_cfg = litert_lm_thinking_config_create();
+    if (thinking_cfg) {
+      litert_lm_thinking_config_set_enable_thinking(thinking_cfg, false);
+      litert_lm_conversation_config_set_thinking_config(conv_config, thinking_cfg);
+      litert_lm_thinking_config_delete(thinking_cfg);
+    }
   }
   if (session_config)
     litert_lm_session_config_delete(session_config);
@@ -276,6 +350,13 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
 
   LiteRtLmConversationOptionalArgs *opt_args = litert_lm_conversation_optional_args_create();
   if (opt_args) {
+    litert_lm_conversation_optional_args_set_max_output_tokens(opt_args, max_tok);
+    LiteRtLmThinkingConfig *thinking_cfg = litert_lm_thinking_config_create();
+    if (thinking_cfg) {
+      litert_lm_thinking_config_set_enable_thinking(thinking_cfg, false);
+      litert_lm_conversation_optional_args_set_thinking_config(opt_args, thinking_cfg);
+      litert_lm_thinking_config_delete(thinking_cfg);
+    }
     if (opts.frequency_penalty != 0.0f || opts.presence_penalty != 0.0f) {
       LiteRtLmRepetitionPenaltyConfig *rep_cfg = litert_lm_repetition_penalty_config_create();
       if (rep_cfg) {
@@ -338,10 +419,13 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
 
   std::string accumulated = "";
   bool stop_triggered = false;
+  std::string matched_stop = "";
+  bool client_cancelled = false;
 
   // 큐 소비 루프: 데이터를 수신하는 대로 외부 콜백 호출, 취소 감지 시 cancel_process 호출
   while (true) {
     if (is_cancelled && is_cancelled()) {
+      client_cancelled = true;
       litert_lm_conversation_cancel_process(conversation);
       break;
     }
@@ -365,6 +449,7 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
             size_t pos = test_str.find(sw);
             if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
               earliest = pos;
+              matched_stop = sw;
             }
           }
           if (earliest != std::string::npos) {
@@ -388,6 +473,7 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
     }
 
     if (stop_triggered) {
+      lock.unlock();
       done_cb();
       break;
     }
@@ -400,5 +486,34 @@ void MultimodalCliApp::StreamForServer(const std::string &system_msg_str,
     }
   }
 
+  int total_kv_tokens = litert_lm_conversation_get_token_count(conversation);
   litert_lm_conversation_delete(conversation);
+
+  int out_tokens = CountTokens(accumulated);
+  if (client_cancelled) {
+    std::cerr << "[경고] 클라이언트 연결 종료로 스트리밍이 중단되었습니다. (출력: "
+              << out_tokens << " 토큰, KV 사용량: " << total_kv_tokens
+              << " / " << max_tokens_ << " 토큰)" << std::endl;
+  } else if (total_kv_tokens >= max_tokens_ ||
+             (ctx->has_error && ctx->error_msg.find("Max number of tokens") != std::string::npos)) {
+    std::cerr << "[경고] KV 캐시 최대 토큰 한도 도달! (KV 사용량: " << total_kv_tokens
+              << " / " << max_tokens_ << " 토큰, 출력: " << out_tokens
+              << " 토큰) -> 문장이 중간에 잘렸습니다." << std::endl;
+  } else if (ctx->has_error) {
+    std::cerr << "[생성 오류] " << ctx->error_msg << " (출력: " << out_tokens
+              << " 토큰, KV 사용량: " << total_kv_tokens << " / " << max_tokens_
+              << " 토큰)" << std::endl;
+  } else if (opts.max_tokens > 0 && out_tokens >= opts.max_tokens) {
+    std::cerr << "[경고] 요청된 max_tokens(" << opts.max_tokens
+              << ") 한도 도달! (출력: " << out_tokens << " 토큰, KV 사용량: "
+              << total_kv_tokens << " / " << max_tokens_ << " 토큰)" << std::endl;
+  } else if (stop_triggered) {
+    std::cout << "[생성 완료] Stop 시퀀스(\"" << matched_stop << "\") 도달 (출력: "
+              << out_tokens << " 토큰, KV 사용량: " << total_kv_tokens
+              << " / " << max_tokens_ << " 토큰)" << std::endl;
+  } else {
+    std::cout << "[생성 완료] 정상 종료 (출력: " << out_tokens
+              << " 토큰, KV 사용량: " << total_kv_tokens << " / " << max_tokens_
+              << " 토큰)" << std::endl;
+  }
 }

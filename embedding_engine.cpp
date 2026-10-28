@@ -6,42 +6,85 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdlib>
+#include <dlfcn.h>
 
-// LiteRT-LM C API 선언 (헤더 미포함 심볼 정의)
+// LiteRT-LM C API 타입 및 동적 함수 포인터 정의 (다양한 플랫폼 및 구버전 라이브러리 링크 호환성 보장)
 extern "C" {
 typedef struct LiteRtLmEmbeddingEngine LiteRtLmEmbeddingEngine;
 typedef struct LiteRtLmEmbeddingEngineSettings LiteRtLmEmbeddingEngineSettings;
 typedef struct LiteRtLmEmbeddingOptions LiteRtLmEmbeddingOptions;
 typedef struct LiteRtLmEmbeddingResponse LiteRtLmEmbeddingResponse;
 
-LiteRtLmEmbeddingEngineSettings* litert_lm_embedding_engine_settings_create(
-    const char* model_path,
-    const char* backend,
-    const char* vision_backend,
-    const char* audio_backend
+typedef LiteRtLmEmbeddingEngineSettings* (*Fn_settings_create)(const char*, const char*, const char*, const char*);
+typedef void (*Fn_settings_delete)(LiteRtLmEmbeddingEngineSettings*);
+typedef void (*Fn_settings_set_cache_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
+typedef void (*Fn_settings_set_litert_dispatch_lib_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
+
+typedef LiteRtLmEmbeddingEngine* (*Fn_engine_create)(LiteRtLmEmbeddingEngineSettings*);
+typedef void (*Fn_engine_delete)(LiteRtLmEmbeddingEngine*);
+
+typedef LiteRtLmEmbeddingOptions* (*Fn_options_create)();
+typedef void (*Fn_options_delete)(LiteRtLmEmbeddingOptions*);
+typedef void (*Fn_options_set_normalize)(LiteRtLmEmbeddingOptions*, bool);
+typedef void (*Fn_options_set_output_size)(LiteRtLmEmbeddingOptions*, int);
+
+typedef LiteRtLmEmbeddingResponse* (*Fn_compute_embedding)(
+    LiteRtLmEmbeddingEngine*,
+    LiteRtLmInputData**,
+    size_t,
+    LiteRtLmEmbeddingOptions*
 );
-void litert_lm_embedding_engine_settings_delete(LiteRtLmEmbeddingEngineSettings* settings);
-void litert_lm_embedding_engine_settings_set_cache_dir(LiteRtLmEmbeddingEngineSettings* settings, const char* cache_dir);
-void litert_lm_embedding_engine_settings_set_litert_dispatch_lib_dir(LiteRtLmEmbeddingEngineSettings* settings, const char* dir);
-
-LiteRtLmEmbeddingEngine* litert_lm_embedding_engine_create(LiteRtLmEmbeddingEngineSettings* settings);
-void litert_lm_embedding_engine_delete(LiteRtLmEmbeddingEngine* engine);
-
-LiteRtLmEmbeddingOptions* litert_lm_embedding_options_create();
-void litert_lm_embedding_options_delete(LiteRtLmEmbeddingOptions* options);
-void litert_lm_embedding_options_set_normalize(LiteRtLmEmbeddingOptions* options, bool normalize);
-void litert_lm_embedding_options_set_output_size(LiteRtLmEmbeddingOptions* options, int size);
-
-LiteRtLmEmbeddingResponse* litert_lm_embedding_engine_compute_embedding(
-    LiteRtLmEmbeddingEngine* engine,
-    LiteRtLmInputData** input_data_array,
-    size_t num_input_data,
-    LiteRtLmEmbeddingOptions* options
-);
-void litert_lm_embedding_response_delete(LiteRtLmEmbeddingResponse* response);
-size_t litert_lm_embedding_response_get_size(LiteRtLmEmbeddingResponse* response);
-const float* litert_lm_embedding_response_get_values(LiteRtLmEmbeddingResponse* response);
+typedef void (*Fn_response_delete)(LiteRtLmEmbeddingResponse*);
+typedef size_t (*Fn_response_get_size)(LiteRtLmEmbeddingResponse*);
+typedef const float* (*Fn_response_get_values)(LiteRtLmEmbeddingResponse*);
 }
+
+struct EmbeddingApiSymbols {
+    Fn_settings_create settings_create = nullptr;
+    Fn_settings_delete settings_delete = nullptr;
+    Fn_settings_set_cache_dir settings_set_cache_dir = nullptr;
+    Fn_settings_set_litert_dispatch_lib_dir settings_set_litert_dispatch_lib_dir = nullptr;
+    Fn_engine_create engine_create = nullptr;
+    Fn_engine_delete engine_delete = nullptr;
+    Fn_options_create options_create = nullptr;
+    Fn_options_delete options_delete = nullptr;
+    Fn_options_set_normalize options_set_normalize = nullptr;
+    Fn_options_set_output_size options_set_output_size = nullptr;
+    Fn_compute_embedding compute_embedding = nullptr;
+    Fn_response_delete response_delete = nullptr;
+    Fn_response_get_size response_get_size = nullptr;
+    Fn_response_get_values response_get_values = nullptr;
+
+    bool is_available = false;
+
+    static EmbeddingApiSymbols& Get() {
+        static EmbeddingApiSymbols instance;
+        return instance;
+    }
+
+private:
+    EmbeddingApiSymbols() {
+        void* handle = RTLD_DEFAULT;
+        settings_create = (Fn_settings_create)dlsym(handle, "litert_lm_embedding_engine_settings_create");
+        settings_delete = (Fn_settings_delete)dlsym(handle, "litert_lm_embedding_engine_settings_delete");
+        settings_set_cache_dir = (Fn_settings_set_cache_dir)dlsym(handle, "litert_lm_embedding_engine_settings_set_cache_dir");
+        settings_set_litert_dispatch_lib_dir = (Fn_settings_set_litert_dispatch_lib_dir)dlsym(handle, "litert_lm_embedding_engine_settings_set_litert_dispatch_lib_dir");
+        engine_create = (Fn_engine_create)dlsym(handle, "litert_lm_embedding_engine_create");
+        engine_delete = (Fn_engine_delete)dlsym(handle, "litert_lm_embedding_engine_delete");
+        options_create = (Fn_options_create)dlsym(handle, "litert_lm_embedding_options_create");
+        options_delete = (Fn_options_delete)dlsym(handle, "litert_lm_embedding_options_delete");
+        options_set_normalize = (Fn_options_set_normalize)dlsym(handle, "litert_lm_embedding_options_set_normalize");
+        options_set_output_size = (Fn_options_set_output_size)dlsym(handle, "litert_lm_embedding_options_set_output_size");
+        compute_embedding = (Fn_compute_embedding)dlsym(handle, "litert_lm_embedding_engine_compute_embedding");
+        response_delete = (Fn_response_delete)dlsym(handle, "litert_lm_embedding_response_delete");
+        response_get_size = (Fn_response_get_size)dlsym(handle, "litert_lm_embedding_response_get_size");
+        response_get_values = (Fn_response_get_values)dlsym(handle, "litert_lm_embedding_response_get_values");
+
+        is_available = (settings_create && settings_delete && engine_create && engine_delete &&
+                        options_create && options_delete && compute_embedding &&
+                        response_delete && response_get_size && response_get_values);
+    }
+};
 
 static bool file_exists(const std::string &path) {
     if (path.empty()) return false;
@@ -57,7 +100,10 @@ struct EmbeddingEngineWrapper::Impl {
     ~Impl() {
         std::lock_guard<std::mutex> lock(mutex);
         if (engine) {
-            litert_lm_embedding_engine_delete(engine);
+            auto &api = EmbeddingApiSymbols::Get();
+            if (api.engine_delete) {
+                api.engine_delete(engine);
+            }
             engine = nullptr;
         }
     }
@@ -106,8 +152,15 @@ std::string EmbeddingEngineWrapper::EnsureModelAvailable(const std::string &pref
 
 bool EmbeddingEngineWrapper::Initialize(const std::string &model_path, const std::string &backend) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
+    auto &api = EmbeddingApiSymbols::Get();
+
+    if (!api.is_available) {
+        std::cerr << "[임베딩] 현재 라이브러리에서 LiteRT-LM Embedding C API를 지원하지 않습니다." << std::endl;
+        return false;
+    }
+
     if (impl_->engine) {
-        litert_lm_embedding_engine_delete(impl_->engine);
+        api.engine_delete(impl_->engine);
         impl_->engine = nullptr;
     }
 
@@ -118,7 +171,7 @@ bool EmbeddingEngineWrapper::Initialize(const std::string &model_path, const std
 
     std::cout << "[임베딩] 엔진 초기화 중 (백엔드: " << backend << ", 모델: " << model_path << ")..." << std::endl;
 
-    auto* settings = litert_lm_embedding_engine_settings_create(
+    auto* settings = api.settings_create(
         model_path.c_str(),
         backend.c_str(),
         nullptr,
@@ -129,10 +182,12 @@ bool EmbeddingEngineWrapper::Initialize(const std::string &model_path, const std
         return false;
     }
 
-    litert_lm_embedding_engine_settings_set_cache_dir(settings, ".");
+    if (api.settings_set_cache_dir) {
+        api.settings_set_cache_dir(settings, ".");
+    }
 
-    impl_->engine = litert_lm_embedding_engine_create(settings);
-    litert_lm_embedding_engine_settings_delete(settings);
+    impl_->engine = api.engine_create(settings);
+    api.settings_delete(settings);
 
     if (!impl_->engine) {
         std::cerr << "[임베딩] LiteRT-LM EmbeddingEngine 생성 실패" << std::endl;
@@ -158,6 +213,11 @@ std::vector<float> EmbeddingEngineWrapper::ComputeEmbedding(const std::string &t
         return {};
     }
 
+    auto &api = EmbeddingApiSymbols::Get();
+    if (!api.is_available) {
+        return {};
+    }
+
     std::string input_text = text;
     if (input_text.empty()) {
         input_text = " ";
@@ -172,31 +232,31 @@ std::vector<float> EmbeddingEngineWrapper::ComputeEmbedding(const std::string &t
         return {};
     }
 
-    auto* options = litert_lm_embedding_options_create();
+    auto* options = api.options_create();
     if (!options) {
         litert_lm_input_data_delete(input_data);
         return {};
     }
 
-    litert_lm_embedding_options_set_normalize(options, normalize);
-    if (output_size > 0) {
-        litert_lm_embedding_options_set_output_size(options, output_size);
+    api.options_set_normalize(options, normalize);
+    if (output_size > 0 && api.options_set_output_size) {
+        api.options_set_output_size(options, output_size);
     }
 
     LiteRtLmInputData* inputs[] = { input_data };
-    auto* resp = litert_lm_embedding_engine_compute_embedding(impl_->engine, inputs, 1, options);
+    auto* resp = api.compute_embedding(impl_->engine, inputs, 1, options);
 
     std::vector<float> result;
     if (resp) {
-        size_t dim = litert_lm_embedding_response_get_size(resp);
-        const float* vals = litert_lm_embedding_response_get_values(resp);
+        size_t dim = api.response_get_size(resp);
+        const float* vals = api.response_get_values(resp);
         if (dim > 0 && vals != nullptr) {
             result.assign(vals, vals + dim);
         }
-        litert_lm_embedding_response_delete(resp);
+        api.response_delete(resp);
     }
 
-    litert_lm_embedding_options_delete(options);
+    api.options_delete(options);
     litert_lm_input_data_delete(input_data);
 
     return result;

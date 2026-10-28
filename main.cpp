@@ -48,7 +48,10 @@ int main(int argc, char *argv[]) {
       // 서버 모드 명시적 플래그 (기본값이 서버 모드이므로 유지)
     } else if (arg == "--gpu") {
       use_gpu = true;
-    } else if (arg == "--mtp") {
+    } else if (arg == "--mtp" || arg == "--speculative" ||
+               arg == "--enable-speculative-decoding" ||
+               arg == "--enable_speculative_decoding" ||
+               arg == "--enable_speculative_decoding=true") {
       enable_mtp = true;
     } else if (arg == "--port" && i + 1 < argc) {
       port = std::stoi(argv[++i]);

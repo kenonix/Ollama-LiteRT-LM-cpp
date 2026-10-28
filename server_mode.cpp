@@ -479,6 +479,57 @@ static void prepend_system_prompt_to_message(json &msg, const std::string &sys_p
   }
 }
 
+// 메시지 JSON에서 텍스트 본문을 추출 (단일 문자열 및 멀티모달 배열 모두 지원)
+static std::string extract_message_text(const json &msg) {
+  if (!msg.is_object() || !msg.contains("content")) return "";
+  if (msg["content"].is_string()) {
+    return msg["content"].get<std::string>();
+  }
+  if (msg["content"].is_array()) {
+    std::string combined;
+    for (const auto &part : msg["content"]) {
+      if (part.is_object() && part.value("type", "") == "text" && part.contains("text") && part["text"].is_string()) {
+        if (!combined.empty()) combined += "\n";
+        combined += part["text"].get<std::string>();
+      }
+    }
+    return combined;
+  }
+  return "";
+}
+
+// UTF-8 경계를 유지하며 텍스트가 지정된 토큰 예산 이하가 되도록 잘라냄 (keep_tail=true이면 뒷부분 보존)
+static std::string truncate_utf8_to_token_budget(MultimodalCliApp &app, const std::string &text, int max_tok_budget, bool keep_tail = false) {
+  if (text.empty() || max_tok_budget <= 0) return "";
+  int cur_tok = app.CountTokens(text);
+  if (cur_tok <= max_tok_budget) return text;
+
+  double ratio = static_cast<double>(max_tok_budget) / static_cast<double>(std::max(1, cur_tok)) * 0.90;
+  size_t target_bytes = std::max<size_t>(16, static_cast<size_t>(text.size() * ratio));
+  if (target_bytes >= text.size()) target_bytes = text.size() / 2;
+
+  std::string result = text;
+  for (int iter = 0; iter < 6; ++iter) {
+    if (keep_tail) {
+      size_t start = text.size() > target_bytes ? (text.size() - target_bytes) : 0;
+      while (start < text.size() && (static_cast<unsigned char>(text[start]) & 0xC0) == 0x80) {
+        ++start;
+      }
+      result = text.substr(start);
+    } else {
+      size_t end = std::min(text.size(), target_bytes);
+      while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+        --end;
+      }
+      result = text.substr(0, end);
+    }
+    int t = app.CountTokens(result);
+    if (t <= max_tok_budget || target_bytes <= 32) break;
+    target_bytes = static_cast<size_t>(target_bytes * 0.80);
+  }
+  return result;
+}
+
 // 요청 JSON으로부터 세부 생성 옵션(GenerationOptions)을 추출
 static GenerationOptions parse_generation_options(const json &j_req) {
   GenerationOptions opts;
@@ -585,6 +636,9 @@ static json make_openai_model_info(const std::string &model_name) {
 // API 서버 실행부 구현
 void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name, EmbeddingEngineWrapper *emb_engine) {
   httplib::Server svr;
+  svr.set_read_timeout(600, 0);
+  svr.set_write_timeout(600, 0);
+  svr.set_keep_alive_timeout(600);
 
   // CORS 및 프리플라이트 요청 처리 핸들러
   svr.set_pre_routing_handler([](const httplib::Request &req, httplib::Response &res) {
@@ -908,21 +962,14 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
           if (!m.is_object()) continue;
           std::string role = m.value("role", "");
           if (role == "system" || role == "developer") {
-            std::string content = "";
-            if (m.contains("content") && m["content"].is_string()) {
-              content = m["content"].get<std::string>();
-            }
+            std::string content = extract_message_text(m);
             if (!content.empty()) {
               if (!sys_msg.empty()) sys_msg += "\n\n";
               sys_msg += content;
             }
-            full_prompt_text += content + "\n";
           } else {
             json tr = transform_message_for_litert(m, temp_files);
             history_arr.push_back(tr);
-            if (m.contains("content") && m["content"].is_string()) {
-              full_prompt_text += m["content"].get<std::string>() + "\n";
-            }
           }
         }
       }
@@ -943,86 +990,73 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         current_msg_j = {{"role", "user"}, {"content", ""}};
       }
 
-      // 1. 현재 메시지(도구 결과 등)가 비대할 경우 안전하게 중간 생략 (최대 4000자)
-      truncate_long_message(current_msg_j, 4000);
+      // KV 캐시(RAM) 한도 내에서 답변 생성 공간(최소 여유 토큰)을 확보하기 위해 오래된 대화 기록 자동 정리
+      int max_kv_tokens = app.GetMaxTokens();
+      int min_output_reserve = std::min(1024, std::max(256, max_kv_tokens / 5));
+      int max_input_budget = std::max(256, max_kv_tokens - min_output_reserve);
 
-      // 컨텍스트 슬라이딩 윈도우 (엔진 max_tokens 한도 초과 방지)
-      int max_engine_tokens = app.GetMaxTokens();
-      // 모델 응답 생성 버퍼(최소 1536 토큰) 및 오버헤드(300 토큰)를 제외한 안전 한도 설정
-      int target_limit = std::max(2048, max_engine_tokens - 1836);
+      int sys_tokens = sys_msg.empty() ? 0 : (app.CountTokens(sys_msg) + 6);
+      std::string curr_text = extract_message_text(current_msg_j);
+      int curr_tokens = (curr_text.empty() ? 0 : app.CountTokens(curr_text)) + 8;
 
-      std::string curr_text = "";
-      if (current_msg_j.contains("content")) {
-        if (current_msg_j["content"].is_string()) curr_text = current_msg_j["content"].get<std::string>();
-        else curr_text = current_msg_j["content"].dump();
+      std::vector<int> hist_msg_tokens;
+      hist_msg_tokens.reserve(history_arr.size());
+      int hist_tokens_total = 0;
+      for (const auto &hm : history_arr) {
+        std::string htext = extract_message_text(hm);
+        int t = (htext.empty() ? 0 : app.CountTokens(htext)) + 8;
+        hist_msg_tokens.push_back(t);
+        hist_tokens_total += t;
       }
-      int sys_tokens = app.CountTokens(sys_msg);
-      int curr_tokens = app.CountTokens(curr_text);
-      int base_tokens = sys_tokens + curr_tokens + 50;
 
-      int history_budget = target_limit - base_tokens;
-      if (history_budget < 0) {
-        history_arr.clear();
+      int total_est_input = sys_tokens + hist_tokens_total + curr_tokens;
+      size_t dropped_msgs = 0;
+      int dropped_tokens = 0;
+      while (!history_arr.empty() && total_est_input > max_input_budget) {
+        total_est_input -= hist_msg_tokens.front();
+        dropped_tokens += hist_msg_tokens.front();
+        hist_msg_tokens.erase(hist_msg_tokens.begin());
+        history_arr.erase(history_arr.begin());
+        dropped_msgs++;
+      }
+      // 앞에서 user 메시지를 잘라내어 첫 히스토리 메시지가 고아 assistant 메시지가 된 경우에만 턴 정렬 제거
+      while (dropped_msgs > 0 && !history_arr.empty() && history_arr.front().value("role", "") != "user") {
+        total_est_input -= hist_msg_tokens.front();
+        dropped_tokens += hist_msg_tokens.front();
+        hist_msg_tokens.erase(hist_msg_tokens.begin());
+        history_arr.erase(history_arr.begin());
+        dropped_msgs++;
+      }
 
-        // 비상 방어선 (Hard Clamping): 히스토리를 전부 비워도 시스템 지침 + 현재 메시지가 한도를 넘는 경우
-        if (base_tokens > target_limit) {
-          std::cout << "[컨텍스트 하드 클램핑] 시스템 지침(" << sys_tokens << ")과 현재 메시지(" 
-                    << curr_tokens << ")가 안전 한도(" << target_limit << ")를 초과하여 강제 절삭합니다." << std::endl;
-          // 현재 메시지를 더 타이트하게 2000자로 절삭
-          truncate_long_message(current_msg_j, 2000);
-          if (current_msg_j["content"].is_string()) curr_text = current_msg_j["content"].get<std::string>();
-          else curr_text = current_msg_j["content"].dump();
-          curr_tokens = app.CountTokens(curr_text);
+      if (dropped_msgs > 0) {
+        std::cout << "[Server KV Guard] Trimmed " << dropped_msgs << " old history message(s) (~"
+                  << dropped_tokens << " tokens) to keep KV cache within " << max_kv_tokens
+                  << " tokens (reserved >= " << min_output_reserve << " tokens for reply)." << std::endl;
+      }
 
-          // 그래도 초과 시 시스템 지침의 후반부를 안전하게 절삭
-          int allowed_sys_tokens = target_limit - curr_tokens - 100;
-          if (allowed_sys_tokens < 1000) allowed_sys_tokens = 1000;
-          if (sys_tokens > allowed_sys_tokens) {
-            size_t cut_len = (sys_msg.size() * allowed_sys_tokens) / sys_tokens;
-            if (cut_len < sys_msg.size()) {
-              sys_msg = sys_msg.substr(0, cut_len) + "\n\n[... 프롬프트 일부 절삭됨 ...]";
-              sys_tokens = app.CountTokens(sys_msg);
-            }
-          }
-          base_tokens = sys_tokens + curr_tokens + 50;
+      // 히스토리를 모두 비웠는데도 시스템 프롬프트(로어북 등) + 현재 메시지가 예산을 초과하면 안전하게 잘라내어 Prefill 에러 방지
+      if (total_est_input > max_input_budget && !sys_msg.empty()) {
+        int allowed_sys_tokens = std::max(128, max_input_budget - curr_tokens - 16);
+        if (sys_tokens > allowed_sys_tokens) {
+          int old_sys_tokens = sys_tokens;
+          sys_msg = truncate_utf8_to_token_budget(app, sys_msg, allowed_sys_tokens, false);
+          sys_tokens = app.CountTokens(sys_msg) + 6;
+          total_est_input = sys_tokens + curr_tokens;
+          std::cout << "[Server KV Guard] Truncated oversized system prompt from ~" << old_sys_tokens
+                    << " to ~" << sys_tokens << " tokens to prevent KV cache overflow." << std::endl;
         }
-      } else if (!history_arr.empty()) {
-        json trimmed_history = json::array();
-        int accumulated_tokens = 0;
-        int dropped_count = 0;
-
-        // 최신 메시지(뒤)부터 역순으로 탐색하여 예산 내에 들어오는 메시지만 보존
-        for (int idx = static_cast<int>(history_arr.size()) - 1; idx >= 0; --idx) {
-          const auto &item = history_arr[idx];
-          std::string item_text = "";
-          if (item.contains("content")) {
-            if (item["content"].is_string()) item_text = item["content"].get<std::string>();
-            else item_text = item["content"].dump();
-          }
-          int item_tokens = app.CountTokens(item_text) + 20;
-
-          if (accumulated_tokens + item_tokens <= history_budget) {
-            trimmed_history.insert(trimmed_history.begin(), item);
-            accumulated_tokens += item_tokens;
-          } else {
-            dropped_count = idx + 1;
-            break;
-          }
+      }
+      if (total_est_input > max_input_budget && current_msg_j.contains("content") && current_msg_j["content"].is_string()) {
+        int allowed_curr_tokens = std::max(64, max_input_budget - sys_tokens - 16);
+        if (curr_tokens > allowed_curr_tokens) {
+          int old_curr_tokens = curr_tokens;
+          std::string truncated_curr = truncate_utf8_to_token_budget(app, curr_text, allowed_curr_tokens, true);
+          current_msg_j["content"] = truncated_curr;
+          curr_tokens = app.CountTokens(truncated_curr) + 8;
+          total_est_input = sys_tokens + curr_tokens;
+          std::cout << "[Server KV Guard] Truncated oversized user message from ~" << old_curr_tokens
+                    << " to ~" << curr_tokens << " tokens to prevent KV cache overflow." << std::endl;
         }
-
-        if (dropped_count > 0) {
-          std::cout << "[컨텍스트 슬라이딩 윈도우] 오래된 메시지 " << dropped_count
-                    << "개를 트리밍하여 토큰 초과를 방지했습니다. (예상 입력: "
-                    << (base_tokens + accumulated_tokens) << " / " << max_engine_tokens << " 토큰)"
-                    << std::endl;
-        }
-
-        // 트리밍 후 만약 첫 메시지가 'assistant'이면 대화 턴 일관성을 위해 첫 'user' 메시지 이전 고아 메시지 정리
-        while (!trimmed_history.empty() && trimmed_history.front().value("role", "") != "user") {
-          trimmed_history.erase(trimmed_history.begin());
-        }
-
-        history_arr = std::move(trimmed_history);
       }
 
       // LiteRT-LM / Gemma 엔진은 시스템 토큰이 없으므로 첫 번째 user 메시지 앞단에 시스템 프롬프트 병합
@@ -1044,7 +1078,19 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       std::string current_msg_str = current_msg_j.dump();
 
       // 프롬프트 토큰 수 계산 (정확도 높은 카운트)
-      int prompt_tokens = std::max(1, app.CountTokens(full_prompt_text.empty() ? sys_msg : full_prompt_text));
+      int prompt_tokens = std::max(1, total_est_input);
+      int remaining_kv = max_kv_tokens - prompt_tokens;
+      std::cout << "[Server Request] " << req.path << " (stream=" << (want_stream ? "true" : "false")
+                << ") | Est. input tokens: ~" << prompt_tokens
+                << " (sys=" << sys_tokens << ", hist=" << std::max(0, total_est_input - sys_tokens - curr_tokens)
+                << ", curr=" << curr_tokens << ") / Max KV: " << max_kv_tokens
+                << " | Available for reply: ~" << std::max(0, remaining_kv) << " tokens" << std::endl;
+      if (remaining_kv < 256) {
+        std::cerr << "[Server Warning] Input prompt alone uses ~" << prompt_tokens
+                  << " tokens out of " << max_kv_tokens
+                  << " max KV tokens! Only ~" << std::max(0, remaining_kv)
+                  << " tokens remain for generation. Consider reducing system prompt / lorebook size in client." << std::endl;
+      }
 
       // OpenAI 규격용 ID 및 생성 타임스탬프
       std::string chat_id = generate_random_id("chatcmpl-");
@@ -1061,9 +1107,37 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         auto sink_ctx = std::make_shared<SinkCtx>();
         auto cancelled = std::make_shared<std::atomic<bool>>(false);
         auto accumulated_text = std::make_shared<std::string>();
-        auto is_first_chunk = std::make_shared<bool>(true);
+        auto is_first_chunk = std::make_shared<bool>(false);
         auto utf8_asm = std::make_shared<Utf8StreamReassembler>();
         auto tool_parser = std::make_shared<ToolCallStreamParser>();
+
+        // 클라이언트 첫 바이트 타임아웃(TTFT) 방지를 위해 스트림 시작 즉시 초기 빈 어시스턴트 청크 전송
+        if (is_ollama) {
+          json init_j = {
+            {"model", served_model_name},
+            {"created_at", get_iso8601_now()},
+            {"message", {{"role", "assistant"}, {"content", ""}}},
+            {"done", false}
+          };
+          sink_ctx->chunks.push(init_j.dump() + "\n");
+        } else {
+          json init_j = {
+            {"id", chat_id},
+            {"object", "chat.completion.chunk"},
+            {"created", created_ts},
+            {"model", served_model_name},
+            {"system_fingerprint", "fp_litert_lm"},
+            {"choices", json::array({
+              {
+                {"index", 0},
+                {"delta", {{"role", "assistant"}, {"content", ""}}},
+                {"logprobs", nullptr},
+                {"finish_reason", nullptr}
+              }
+            })}
+          };
+          sink_ctx->chunks.push("data: " + init_j.dump() + "\n\n");
+        }
 
         std::thread([&app, sys_msg, history_json_str, current_msg_str, served_model_name, is_ollama,
                      sink_ctx, cancelled, temp_files, gen_opts, chat_id, created_ts,
@@ -1350,19 +1424,62 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
-            // 에러 콜백
-            [sink_ctx, is_ollama, chat_id, created_ts, served_model_name](const std::string &err_msg) { 
-              std::cerr << "[SERVER STREAM ERROR] " << err_msg << std::endl;
+            // 에러 콜백 (토큰 한도 도달 등 에러 발생 시에도 남은 UTF-8 버퍼 플러시 및 정상 종료 청크 전송)
+            [served_model_name, is_ollama, sink_ctx, chat_id, created_ts, utf8_asm, is_first_chunk, tool_parser](const std::string &err_msg) { 
+              std::cerr << "[Server Stream Error] " << err_msg << std::endl;
               std::lock_guard<std::mutex> lock(sink_ctx->mtx); 
+              std::string leftover = utf8_asm->flush();
+              auto p_res = tool_parser->process(leftover);
+              auto p_flush = tool_parser->flush();
+              std::string final_text = p_res.text_to_emit + p_flush.text_to_emit;
+
+              if (!final_text.empty() || (!is_ollama && *is_first_chunk)) {
+                if (is_ollama) {
+                  json chunk_j = {
+                    {"model", served_model_name},
+                    {"created_at", get_iso8601_now()},
+                    {"message", {{"role", "assistant"}, {"content", final_text}}},
+                    {"done", false}
+                  };
+                  sink_ctx->chunks.push(chunk_j.dump() + "\n");
+                } else {
+                  json delta_obj = json::object();
+                  if (*is_first_chunk) {
+                    delta_obj["role"] = "assistant";
+                    *is_first_chunk = false;
+                  }
+                  delta_obj["content"] = final_text;
+                  json chunk_j = {
+                    {"id", chat_id},
+                    {"object", "chat.completion.chunk"},
+                    {"created", created_ts},
+                    {"model", served_model_name},
+                    {"system_fingerprint", "fp_litert_lm"},
+                    {"choices", json::array({
+                      {
+                        {"index", 0},
+                        {"delta", delta_obj},
+                        {"logprobs", nullptr},
+                        {"finish_reason", nullptr}
+                      }
+                    })}
+                  };
+                  sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
+                }
+              }
+
+              std::string finish_reason = (err_msg.find("Max number of tokens") != std::string::npos) ? "length" : "stop";
               if (is_ollama) {
-                json err_j = {
+                json done_j = {
                   {"model", served_model_name},
-                  {"error", err_msg},
+                  {"created_at", get_iso8601_now()},
+                  {"message", {{"role", "assistant"}, {"content", ""}}},
+                  {"done_reason", finish_reason},
                   {"done", true}
                 };
-                sink_ctx->chunks.push(err_j.dump() + "\n");
+                sink_ctx->chunks.push(done_j.dump() + "\n");
               } else {
-                json err_j = {
+                json stop_j = {
                   {"id", chat_id},
                   {"object", "chat.completion.chunk"},
                   {"created", created_ts},
@@ -1371,13 +1488,13 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
                   {"choices", json::array({
                     {
                       {"index", 0},
-                      {"delta", {{"role", "assistant"}, {"content", "[오류 발생: " + err_msg + "]"}}},
+                      {"delta", json::object()},
                       {"logprobs", nullptr},
-                      {"finish_reason", "stop"}
+                      {"finish_reason", finish_reason}
                     }
                   })}
                 };
-                sink_ctx->chunks.push("data: " + err_j.dump() + "\n\n");
+                sink_ctx->chunks.push("data: " + stop_j.dump() + "\n\n");
                 sink_ctx->chunks.push("data: [DONE]\n\n");
               }
               sink_ctx->done = true; 
@@ -1389,10 +1506,34 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
           );
         }).detach();
 
-        res.set_chunked_content_provider(is_ollama ? "application/x-ndjson" : "text/event-stream", [sink_ctx, cancelled](size_t, httplib::DataSink &sink) {
+        res.set_chunked_content_provider(is_ollama ? "application/x-ndjson" : "text/event-stream",
+            [sink_ctx, cancelled, is_ollama, served_model_name](size_t, httplib::DataSink &sink) {
           while (true) {
             std::unique_lock<std::mutex> lock(sink_ctx->mtx);
-            sink_ctx->cv.wait(lock, [&sink_ctx]{ return !sink_ctx->chunks.empty() || sink_ctx->done; });
+            bool ready = sink_ctx->cv.wait_for(lock, std::chrono::seconds(3), [&sink_ctx]{
+              return !sink_ctx->chunks.empty() || sink_ctx->done;
+            });
+            if (!ready && !sink_ctx->done) {
+              // Prefill 도중 클라이언트 유휴 타임아웃 방지를 위해 3초마다 keep-alive 청크 전송
+              std::string keepalive;
+              if (is_ollama) {
+                json ka_j = {
+                  {"model", served_model_name},
+                  {"created_at", get_iso8601_now()},
+                  {"message", {{"role", "assistant"}, {"content", ""}}},
+                  {"done", false}
+                };
+                keepalive = ka_j.dump() + "\n";
+              } else {
+                keepalive = ": keep-alive\n\n";
+              }
+              lock.unlock();
+              if (!sink.write(keepalive.c_str(), keepalive.size())) {
+                cancelled->store(true);
+                return false;
+              }
+              continue;
+            }
             while (!sink_ctx->chunks.empty()) {
               std::string data = std::move(sink_ctx->chunks.front());
               sink_ctx->chunks.pop();
@@ -1498,6 +1639,11 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       }
 
       int prompt_tokens = std::max(1, app.CountTokens(prompt));
+      int max_kv_tokens = app.GetMaxTokens();
+      std::cout << "[Server Request] " << req.path << " (stream=" << (want_stream ? "true" : "false")
+                << ") | Est. input tokens: ~" << prompt_tokens << " / Max KV: " << max_kv_tokens
+                << " | Available for reply: ~" << std::max(0, max_kv_tokens - prompt_tokens) << " tokens" << std::endl;
+
       std::string cmpl_id = generate_random_id("cmpl-");
       uint64_t created_ts = static_cast<uint64_t>(time(nullptr));
 
@@ -1515,6 +1661,7 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         auto cancelled = std::make_shared<std::atomic<bool>>(false);
 
         auto utf8_asm = std::make_shared<Utf8StreamReassembler>();
+        sink_ctx->chunks.push(": keep-alive\n\n");
 
         std::thread([&app, current_msg_str, served_model_name, sink_ctx, cancelled, gen_opts, cmpl_id, created_ts, utf8_asm]() {
           app.StreamForServer(DEFAULT_SYSTEM_PROMPT, "", current_msg_str,
@@ -1580,8 +1727,44 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
-            [sink_ctx](const std::string &) {
+            [served_model_name, sink_ctx, cmpl_id, created_ts, utf8_asm](const std::string &err_msg) {
+              std::cerr << "[Server Stream Error] " << err_msg << std::endl;
               std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+              std::string leftover = utf8_asm->flush();
+              if (!leftover.empty()) {
+                json chunk_j = {
+                  {"id", cmpl_id},
+                  {"object", "text_completion"},
+                  {"created", created_ts},
+                  {"model", served_model_name},
+                  {"choices", json::array({
+                    {
+                      {"text", leftover},
+                      {"index", 0},
+                      {"logprobs", nullptr},
+                      {"finish_reason", nullptr}
+                    }
+                  })}
+                };
+                sink_ctx->chunks.push("data: " + chunk_j.dump() + "\n\n");
+              }
+              std::string finish_reason = (err_msg.find("Max number of tokens") != std::string::npos) ? "length" : "stop";
+              json stop_j = {
+                {"id", cmpl_id},
+                {"object", "text_completion"},
+                {"created", created_ts},
+                {"model", served_model_name},
+                {"choices", json::array({
+                  {
+                    {"text", ""},
+                    {"index", 0},
+                    {"logprobs", nullptr},
+                    {"finish_reason", finish_reason}
+                  }
+                })}
+              };
+              sink_ctx->chunks.push("data: " + stop_j.dump() + "\n\n");
+              sink_ctx->chunks.push("data: [DONE]\n\n");
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
@@ -1593,7 +1776,18 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         res.set_chunked_content_provider("text/event-stream", [sink_ctx, cancelled](size_t, httplib::DataSink &sink) {
           while (true) {
             std::unique_lock<std::mutex> lock(sink_ctx->mtx);
-            sink_ctx->cv.wait(lock, [&sink_ctx]{ return !sink_ctx->chunks.empty() || sink_ctx->done; });
+            bool ready = sink_ctx->cv.wait_for(lock, std::chrono::seconds(3), [&sink_ctx]{
+              return !sink_ctx->chunks.empty() || sink_ctx->done;
+            });
+            if (!ready && !sink_ctx->done) {
+              lock.unlock();
+              const char *ka = ": keep-alive\n\n";
+              if (!sink.write(ka, 14)) {
+                cancelled->store(true);
+                return false;
+              }
+              continue;
+            }
             while (!sink_ctx->chunks.empty()) {
               std::string data = std::move(sink_ctx->chunks.front());
               sink_ctx->chunks.pop();
@@ -1652,6 +1846,12 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         effective_prompt = sys_msg + "\n\n" + prompt;
       }
 
+      int prompt_tokens = std::max(1, app.CountTokens(effective_prompt));
+      int max_kv_tokens = app.GetMaxTokens();
+      std::cout << "[Server Request] " << req.path << " (stream=" << (want_stream ? "true" : "false")
+                << ") | Est. input tokens: ~" << prompt_tokens << " / Max KV: " << max_kv_tokens
+                << " | Available for reply: ~" << std::max(0, max_kv_tokens - prompt_tokens) << " tokens" << std::endl;
+
       GenerationOptions gen_opts = parse_generation_options(j_req);
       auto temp_files = std::make_shared<TempFilesCleanup>();
       json current_msg_j;
@@ -1689,6 +1889,13 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
         auto cancelled = std::make_shared<std::atomic<bool>>(false);
 
         auto utf8_asm = std::make_shared<Utf8StreamReassembler>();
+        json init_j = {
+          {"model", served_model_name},
+          {"created_at", get_iso8601_now()},
+          {"response", ""},
+          {"done", false}
+        };
+        sink_ctx->chunks.push(init_j.dump() + "\n");
 
         std::thread([&app, sys_msg, current_msg_str, served_model_name, sink_ctx, cancelled, temp_files, gen_opts, utf8_asm]() {
           app.StreamForServer(sys_msg, "", current_msg_str,
@@ -1730,8 +1937,28 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
-            [sink_ctx](const std::string &) {
+            [served_model_name, sink_ctx, utf8_asm](const std::string &err_msg) {
+              std::cerr << "[Server Stream Error] " << err_msg << std::endl;
               std::lock_guard<std::mutex> lock(sink_ctx->mtx);
+              std::string leftover = utf8_asm->flush();
+              if (!leftover.empty()) {
+                json chunk_j = {
+                  {"model", served_model_name},
+                  {"created_at", get_iso8601_now()},
+                  {"response", leftover},
+                  {"done", false}
+                };
+                sink_ctx->chunks.push(chunk_j.dump() + "\n");
+              }
+              std::string finish_reason = (err_msg.find("Max number of tokens") != std::string::npos) ? "length" : "stop";
+              json done_j = {
+                {"model", served_model_name},
+                {"created_at", get_iso8601_now()},
+                {"response", ""},
+                {"done_reason", finish_reason},
+                {"done", true}
+              };
+              sink_ctx->chunks.push(done_j.dump() + "\n");
               sink_ctx->done = true;
               sink_ctx->cv.notify_one();
             },
@@ -1740,10 +1967,28 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
           );
         }).detach();
 
-        res.set_chunked_content_provider("application/x-ndjson", [sink_ctx, cancelled](size_t, httplib::DataSink &sink) {
+        res.set_chunked_content_provider("application/x-ndjson",
+            [sink_ctx, cancelled, served_model_name](size_t, httplib::DataSink &sink) {
           while (true) {
             std::unique_lock<std::mutex> lock(sink_ctx->mtx);
-            sink_ctx->cv.wait(lock, [&sink_ctx]{ return !sink_ctx->chunks.empty() || sink_ctx->done; });
+            bool ready = sink_ctx->cv.wait_for(lock, std::chrono::seconds(3), [&sink_ctx]{
+              return !sink_ctx->chunks.empty() || sink_ctx->done;
+            });
+            if (!ready && !sink_ctx->done) {
+              json ka_j = {
+                {"model", served_model_name},
+                {"created_at", get_iso8601_now()},
+                {"response", ""},
+                {"done", false}
+              };
+              std::string keepalive = ka_j.dump() + "\n";
+              lock.unlock();
+              if (!sink.write(keepalive.c_str(), keepalive.size())) {
+                cancelled->store(true);
+                return false;
+              }
+              continue;
+            }
             while (!sink_ctx->chunks.empty()) {
               std::string data = std::move(sink_ctx->chunks.front());
               sink_ctx->chunks.pop();
