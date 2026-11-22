@@ -57,3 +57,15 @@ std::string generate_random_id(const std::string &prefix);
  * @return std::string 로컬 파일 절대 경로 (실패 시 빈 문자열)
  */
 std::string save_image_source_to_temp_file(const std::string &source, bool &is_temp);
+
+/**
+ * @brief 오디오 소스(URL, Base64/Data URI, 로컬 파일 경로)를 판별하여
+ *        LiteRT-LM(miniaudio)이 디코딩 가능한 로컬 파일 경로(WAV/MP3/FLAC)로 변환합니다.
+ *        webm/ogg/m4a 등 미지원 포맷은 ffmpeg가 있는 경우 16kHz 모노 WAV로 자동 변환합니다.
+ *
+ * @param source URL (http/https), Base64, Data URI, 또는 로컬 파일 경로
+ * @param format_hint 포맷 힌트 (예: "wav", "mp3", "webm", 빈 문자열 가능)
+ * @param is_temp [out] 생성된 파일이 임시 파일인지 여부 (정리 대상 여부)
+ * @return std::string 로컬 파일 절대 경로 (실패 시 빈 문자열)
+ */
+std::string save_audio_source_to_temp_file(const std::string &source, const std::string &format_hint, bool &is_temp);

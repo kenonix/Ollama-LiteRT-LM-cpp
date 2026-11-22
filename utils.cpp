@@ -5,7 +5,11 @@
 #include <ctime>
 #include <vector>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <random>
+#include <fstream>
+#include <algorithm>
+#include <cctype>
 
 // 문자열의 앞뒤 공백 제거 구현
 std::string trim(const std::string &s) {
@@ -103,6 +107,27 @@ std::string generate_random_id(const std::string &prefix) {
   return id;
 }
 
+// 쉘을 거치지 않고 외부 프로세스를 안전하게 실행 (명령어 인젝션 방지)
+static int run_process_no_shell(const std::vector<std::string> &args) {
+  if (args.empty()) return -1;
+  pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    std::vector<char *> c_args;
+    c_args.reserve(args.size() + 1);
+    for (const auto &a : args) {
+      c_args.push_back(const_cast<char *>(a.c_str()));
+    }
+    c_args.push_back(nullptr);
+    execvp(c_args[0], c_args.data());
+    _exit(127);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0) return -1;
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  return -1;
+}
+
 // 이미지 소스 판별 및 파일 경로 획득 구현
 std::string save_image_source_to_temp_file(const std::string &source, bool &is_temp) {
   is_temp = false;
@@ -122,8 +147,7 @@ std::string save_image_source_to_temp_file(const std::string &source, bool &is_t
     if (fd == -1) return "";
     close(fd);
 
-    std::string cmd = "curl -s -L --max-time 15 \"" + source + "\" -o \"" + tmp_path + "\"";
-    int ret = std::system(cmd.c_str());
+    int ret = run_process_no_shell({"curl", "-s", "-L", "--max-time", "15", source, "-o", tmp_path});
     if (ret == 0 && access(tmp_path, R_OK) == 0) {
       is_temp = true;
       return std::string(tmp_path);
@@ -141,4 +165,152 @@ std::string save_image_source_to_temp_file(const std::string &source, bool &is_t
   }
 
   return "";
+}
+
+// 바이트 헤더(매직 바이트)로 miniaudio 기본 지원 포맷(WAV/MP3/FLAC)인지 판별
+static std::string detect_native_audio_ext(const char *data, size_t len) {
+  if (!data || len < 4) return "";
+  if (len >= 12 &&
+      data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+      data[8] == 'W' && data[9] == 'A' && data[10] == 'V' && data[11] == 'E') {
+    return ".wav";
+  }
+  if (data[0] == 'f' && data[1] == 'L' && data[2] == 'a' && data[3] == 'C') {
+    return ".flac";
+  }
+  if (data[0] == 'I' && data[1] == 'D' && data[2] == '3') {
+    return ".mp3";
+  }
+  unsigned char b0 = static_cast<unsigned char>(data[0]);
+  unsigned char b1 = static_cast<unsigned char>(data[1]);
+  if (b0 == 0xFF && (b1 & 0xE0) == 0xE0) {
+    return ".mp3";
+  }
+  return "";
+}
+
+// 미지원 오디오 파일(webm/ogg/m4a 등)을 ffmpeg로 16kHz 모노 WAV로 변환
+static std::string convert_audio_to_wav_temp(const std::string &input_path) {
+  char out_path[] = "/tmp/litert_audio_conv_XXXXXX.wav";
+  int fd = mkstemps(out_path, 4);
+  if (fd == -1) return "";
+  close(fd);
+
+  int ret = run_process_no_shell({
+      "ffmpeg", "-y", "-loglevel", "error",
+      "-i", input_path,
+      "-ac", "1", "-ar", "16000", "-f", "wav",
+      out_path
+  });
+  if (ret == 0 && access(out_path, R_OK) == 0) {
+    return std::string(out_path);
+  }
+  std::remove(out_path);
+  return "";
+}
+
+static std::string write_bytes_to_temp_audio(const std::string &bytes, const std::string &ext) {
+  if (bytes.empty()) return "";
+  std::string tmpl = "/tmp/litert_audio_XXXXXX" + ext;
+  std::vector<char> buf(tmpl.begin(), tmpl.end());
+  buf.push_back('\0');
+  int fd = mkstemps(buf.data(), static_cast<int>(ext.size()));
+  if (fd == -1) return "";
+  FILE *f = fdopen(fd, "wb");
+  if (!f) {
+    close(fd);
+    std::remove(buf.data());
+    return "";
+  }
+  fwrite(bytes.data(), 1, bytes.size(), f);
+  fclose(f);
+  return std::string(buf.data());
+}
+
+// 오디오 소스 판별 및 LiteRT-LM 호환 로컬 파일 경로 획득 구현
+std::string save_audio_source_to_temp_file(const std::string &source, const std::string &format_hint, bool &is_temp) {
+  is_temp = false;
+  if (source.empty()) return "";
+
+  auto normalize_ext = [](std::string fmt) -> std::string {
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (!fmt.empty() && fmt[0] == '.') fmt.erase(0, 1);
+    if (fmt == "wav" || fmt == "wave" || fmt == "x-wav") return ".wav";
+    if (fmt == "mp3" || fmt == "mpeg") return ".mp3";
+    if (fmt == "flac") return ".flac";
+    if (fmt == "webm" || fmt == "weba") return ".webm";
+    if (fmt == "ogg" || fmt == "opus") return ".ogg";
+    if (fmt == "m4a" || fmt == "mp4" || fmt == "aac") return ".m4a";
+    return ".bin";
+  };
+
+  auto ensure_miniaudio_compatible = [&](const std::string &file_path, bool owns_file) -> std::string {
+    std::ifstream ifs(file_path, std::ios::binary);
+    char header[16] = {0};
+    ifs.read(header, sizeof(header));
+    size_t n = static_cast<size_t>(ifs.gcount());
+    ifs.close();
+    if (!detect_native_audio_ext(header, n).empty()) {
+      is_temp = owns_file;
+      return file_path;
+    }
+    std::string converted = convert_audio_to_wav_temp(file_path);
+    if (!converted.empty()) {
+      if (owns_file) std::remove(file_path.c_str());
+      is_temp = true;
+      return converted;
+    }
+    // ffmpeg가 없거나 변환 실패 시 원본 파일 반환 (miniaudio에 위임)
+    is_temp = owns_file;
+    return file_path;
+  };
+
+  // 1. 이미 존재하는 로컬 파일인지 확인 (data: URI나 긴 base64 문자열은 제외)
+  if (source.size() < 4096 && source.rfind("data:", 0) != 0 &&
+      source.rfind("http://", 0) != 0 && source.rfind("https://", 0) != 0) {
+    std::string expanded = expand_path(source);
+    if (access(expanded.c_str(), R_OK) == 0) {
+      return ensure_miniaudio_compatible(expanded, false);
+    }
+  }
+
+  // 2. HTTP 또는 HTTPS URL인 경우 curl로 다운로드
+  if (source.rfind("http://", 0) == 0 || source.rfind("https://", 0) == 0) {
+    std::string ext = format_hint.empty() ? ".bin" : normalize_ext(format_hint);
+    std::string tmpl = "/tmp/litert_audio_url_XXXXXX" + ext;
+    std::vector<char> buf(tmpl.begin(), tmpl.end());
+    buf.push_back('\0');
+    int fd = mkstemps(buf.data(), static_cast<int>(ext.size()));
+    if (fd == -1) return "";
+    close(fd);
+    std::string tmp_path(buf.data());
+
+    int ret = run_process_no_shell({"curl", "-s", "-L", "--max-time", "15", source, "-o", tmp_path});
+    if (ret == 0 && access(tmp_path.c_str(), R_OK) == 0) {
+      return ensure_miniaudio_compatible(tmp_path, true);
+    }
+    std::remove(tmp_path.c_str());
+    return "";
+  }
+
+  // 3. Base64 / Data URI 디코딩
+  std::string decoded = base64_decode(source);
+  if (decoded.empty()) return "";
+
+  std::string native_ext = detect_native_audio_ext(decoded.data(), decoded.size());
+  if (!native_ext.empty()) {
+    std::string path = write_bytes_to_temp_audio(decoded, native_ext);
+    if (!path.empty()) {
+      is_temp = true;
+      return path;
+    }
+    return "";
+  }
+
+  // miniaudio 미지원 포맷(webm/ogg/m4a 등)인 경우 임시 저장 후 ffmpeg로 WAV 변환 시도
+  std::string hint_ext = format_hint.empty() ? ".bin" : normalize_ext(format_hint);
+  std::string raw_path = write_bytes_to_temp_audio(decoded, hint_ext);
+  if (raw_path.empty()) return "";
+  return ensure_miniaudio_compatible(raw_path, true);
 }

@@ -16,8 +16,8 @@ using json = nlohmann::ordered_json;
  * @brief 생성 옵션 파라미터 구조체 (OpenAI / Ollama 공용)
  */
 struct GenerationOptions {
-  float temperature = 0.7f;
-  float top_p = 0.95f;
+  float temperature = 0.4f;
+  float top_p = 0.90f;
   int top_k = 40;
   int max_tokens = -1;
   int seed = -1;
@@ -35,13 +35,47 @@ struct GenerationOptions {
 std::string extract_text_from_chunk(const char *chunk);
 
 /**
+ * @brief LLM 엔진 인터페이스 (LiteRT-LM 및 llama.cpp GGUF 공용)
+ */
+class ILlmEngine {
+public:
+  virtual ~ILlmEngine() = default;
+
+  // 최대 토큰 한도 조회
+  virtual int GetMaxTokens() const = 0;
+
+  // 시스템 역할(role: "system") 메시지 직접 지원 여부
+  virtual bool SupportsSystemRole() const { return false; }
+
+  // 텍스트 토큰 수 계산
+  virtual int CountTokens(const std::string &text) = 0;
+
+  // 서버용 동기 생성 함수 (OpenAI/Ollama API 대응)
+  virtual std::string GenerateForServer(const std::string &system_msg_str,
+                                        const std::string &history_json,
+                                        const std::string &current_msg,
+                                        const GenerationOptions &opts = {}) = 0;
+
+  // 서버용 스트리밍 생성 함수 (취소 콜백 지원)
+  virtual void StreamForServer(const std::string &system_msg_str,
+                               const std::string &history_json,
+                               const std::string &current_msg,
+                               std::function<void(const std::string &chunk)> chunk_cb,
+                               std::function<void()> done_cb,
+                               std::function<void(const std::string &err)> error_cb,
+                               std::function<bool()> is_cancelled = nullptr,
+                               const GenerationOptions &opts = {}) = 0;
+};
+
+/**
  * @brief LiteRT-LM 멀티모달 기능을 관리하는 고수준 래퍼 클래스입니다.
  */
-class MultimodalCliApp {
+class MultimodalCliApp : public ILlmEngine {
 private:
   LiteRtLmEngine *engine_ = nullptr; // 엔진 인스턴스 포인터
   std::string system_prompt_;        // 활성화된 시스템 프롬프트
   int max_tokens_ = 2048;            // 최대 토큰 수
+  bool audio_enabled_ = false;       // 오디오 입력(모달리티) 활성화 여부
   std::recursive_mutex engine_mutex_; // 엔진 호출 직렬화 뮤텍스 (재귀적 잠금 지원)
   std::mutex tokenizer_mutex_;        // 토크나이저 전용 뮤텍스 (생성 중 블로킹 방지)
 
@@ -49,19 +83,19 @@ public:
   // 생성자: 모델 경로와 시스템 프롬프트를 사용하여 엔진 초기화
   MultimodalCliApp(const std::string &model_path, const std::string &system_prompt = "", bool use_gpu = false, int max_tokens = 2048, bool enable_mtp = false);
   // 소멸자: 엔진 자원 해제
-  ~MultimodalCliApp();
+  ~MultimodalCliApp() override;
 
   // 최대 토큰 한도 조회
-  int GetMaxTokens() const { return max_tokens_; }
+  int GetMaxTokens() const override { return max_tokens_; }
 
   // 텍스트 토큰 수 계산 (정확한 사용량 산출)
-  int CountTokens(const std::string &text);
+  int CountTokens(const std::string &text) override;
 
   // 서버용 동기 생성 함수 (OpenAI/Ollama API 대응)
   std::string GenerateForServer(const std::string &system_msg_str,
                                 const std::string &history_json,
                                 const std::string &current_msg,
-                                const GenerationOptions &opts = {});
+                                const GenerationOptions &opts = {}) override;
 
   // 서버용 스트리밍 생성 함수 (취소 콜백 지원)
   void StreamForServer(const std::string &system_msg_str,
@@ -71,5 +105,5 @@ public:
                        std::function<void()> done_cb,
                        std::function<void(const std::string &err)> error_cb,
                        std::function<bool()> is_cancelled = nullptr,
-                       const GenerationOptions &opts = {});
+                       const GenerationOptions &opts = {}) override;
 };

@@ -29,6 +29,26 @@ else()
     set(ARCH_RPATH "")
 endif()
 
+# llama.cpp 라이브러리 연동 (GGUF 모델 지원)
+set(LLAMA_CPP_DIR "/home/kenonix/llama.cpp" CACHE PATH "Path to llama.cpp repository")
+if(EXISTS "${LLAMA_CPP_DIR}/include/llama.h" AND EXISTS "${LLAMA_CPP_DIR}/build/bin/libllama.so")
+    message(STATUS "Found llama.cpp: ${LLAMA_CPP_DIR} (GGUF 지원 활성화)")
+    include_directories(
+        ${LLAMA_CPP_DIR}/include
+        ${LLAMA_CPP_DIR}/ggml/include
+        ${LLAMA_CPP_DIR}/common
+    )
+    link_directories(${LLAMA_CPP_DIR}/build/bin)
+    set(LLAMA_SRCS llama_engine.cpp)
+    set(LLAMA_LIBS llama llama-common ggml ggml-base ggml-cpu ggml-cuda)
+    add_compile_definitions(HAS_LLAMA_CPP=1)
+    set(ARCH_RPATH "${ARCH_RPATH};${LLAMA_CPP_DIR}/build/bin")
+else()
+    message(STATUS "llama.cpp not found - GGUF support disabled")
+    set(LLAMA_SRCS "")
+    set(LLAMA_LIBS "")
+endif()
+
 add_executable(multimodal_cli 
     main.cpp
     utils.cpp
@@ -36,6 +56,7 @@ add_executable(multimodal_cli
     llm_engine.cpp
     embedding_engine.cpp
     server_mode.cpp
+    ${LLAMA_SRCS}
 )
 
 set_target_properties(multimodal_cli PROPERTIES
@@ -46,6 +67,7 @@ set_target_properties(multimodal_cli PROPERTIES
 target_link_libraries(multimodal_cli
     PRIVATE
     litert-lm
+    ${LLAMA_LIBS}
     pthread
     dl
 )

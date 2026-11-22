@@ -6,8 +6,8 @@ const std::string PROMPT_FILE = "system_prompt.txt";
 const std::string CONFIG_FILE = "config.json";
 
 // 기본 시스템 프롬프트 (한국어 설정)
-const std::string DEFAULT_SYSTEM_PROMPT = R"(당신의 이름은 AI입니다.
-한국어만 사용하며, 친절하고 명확하게 답변합니다.)";
+const std::string DEFAULT_SYSTEM_PROMPT = R"(당신은 한국어로 소통하는 유능하고 친절한 AI 어시스턴트입니다.
+반드시 자연스럽고 정확한 한국어 표준어로만 답변하며, 사용자의 질문 의도에 맞게 핵심을 명확하게 설명합니다.)";
 
 // 설정을 LiteRT-LM 엔진 호환 JSON 형식으로 변환
 json ChatConfig::to_json() const {

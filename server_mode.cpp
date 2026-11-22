@@ -380,19 +380,36 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
     }
   }
 
-  // 1. Ollama "images" 필드 (Base64 배열) 처리
-  if (msg.contains("images") && msg["images"].is_array() && !msg["images"].empty()) {
+  // 1. Ollama "images" / "audios" 필드 (Base64 배열 등) 처리
+  bool has_ollama_images = msg.contains("images") && msg["images"].is_array() && !msg["images"].empty();
+  bool has_ollama_audios = msg.contains("audios") && msg["audios"].is_array() && !msg["audios"].empty();
+  if (has_ollama_images || has_ollama_audios) {
     std::string text_content = "";
     if (msg.contains("content") && msg["content"].is_string()) {
       text_content = msg["content"].get<std::string>();
     }
     json content_arr = json::array();
-    for (const auto &img_b64 : msg["images"]) {
-      if (img_b64.is_string()) {
-        std::string path = save_base64_to_temp_file(img_b64.get<std::string>());
-        if (!path.empty()) {
-          temp_files->paths.push_back(path);
-          content_arr.push_back({{"type", "image"}, {"path", path}});
+    if (has_ollama_images) {
+      for (const auto &img_b64 : msg["images"]) {
+        if (img_b64.is_string()) {
+          bool is_temp = false;
+          std::string path = save_image_source_to_temp_file(img_b64.get<std::string>(), is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "image"}, {"path", path}});
+          }
+        }
+      }
+    }
+    if (has_ollama_audios) {
+      for (const auto &aud_src : msg["audios"]) {
+        if (aud_src.is_string()) {
+          bool is_temp = false;
+          std::string path = save_audio_source_to_temp_file(aud_src.get<std::string>(), "", is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "audio"}, {"path", path}});
+          }
         }
       }
     }
@@ -401,10 +418,11 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
     }
     transformed["content"] = content_arr;
     transformed.erase("images");
+    transformed.erase("audios");
     return transformed;
   }
 
-  // 2. OpenAI 멀티모달 content 배열 (image_url: Base64 data URL, 일반 URL, 로컬 파일 등) 처리
+  // 2. OpenAI 멀티모달 content 배열 (text, image_url/image, input_audio/audio_url/audio) 처리
   if (msg.contains("content") && msg["content"].is_array()) {
     json content_arr = json::array();
     for (const auto &part : msg["content"]) {
@@ -417,7 +435,7 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
         if (part.contains("image_url")) {
           if (part["image_url"].is_string()) {
             img_src = part["image_url"].get<std::string>();
-          } else if (part["image_url"].is_object() && part["image_url"].contains("url")) {
+          } else if (part["image_url"].is_object() && part["image_url"].contains("url") && part["image_url"]["url"].is_string()) {
             img_src = part["image_url"]["url"].get<std::string>();
           }
         }
@@ -429,6 +447,81 @@ static json transform_message_for_litert(const json &msg, std::shared_ptr<TempFi
               temp_files->paths.push_back(path);
             }
             content_arr.push_back({{"type", "image"}, {"path", path}});
+          }
+        }
+      } else if (type == "image") {
+        if (part.contains("path") && part["path"].is_string()) {
+          content_arr.push_back({{"type", "image"}, {"path", part["path"].get<std::string>()}});
+        } else if (part.contains("blob") && part["blob"].is_string()) {
+          content_arr.push_back({{"type", "image"}, {"blob", part["blob"].get<std::string>()}});
+        } else if (part.contains("url") && part["url"].is_string()) {
+          bool is_temp = false;
+          std::string path = save_image_source_to_temp_file(part["url"].get<std::string>(), is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "image"}, {"path", path}});
+          }
+        }
+      } else if (type == "input_audio") {
+        std::string aud_src = "";
+        std::string aud_fmt = "";
+        if (part.contains("input_audio") && part["input_audio"].is_object()) {
+          const auto &ia = part["input_audio"];
+          if (ia.contains("data") && ia["data"].is_string()) {
+            aud_src = ia["data"].get<std::string>();
+          }
+          if (ia.contains("format") && ia["format"].is_string()) {
+            aud_fmt = ia["format"].get<std::string>();
+          }
+        } else if (part.contains("data") && part["data"].is_string()) {
+          aud_src = part["data"].get<std::string>();
+          if (part.contains("format") && part["format"].is_string()) {
+            aud_fmt = part["format"].get<std::string>();
+          }
+        }
+        if (!aud_src.empty()) {
+          bool is_temp = false;
+          std::string path = save_audio_source_to_temp_file(aud_src, aud_fmt, is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "audio"}, {"path", path}});
+          }
+        }
+      } else if (type == "audio_url") {
+        std::string aud_src = "";
+        if (part.contains("audio_url")) {
+          if (part["audio_url"].is_string()) {
+            aud_src = part["audio_url"].get<std::string>();
+          } else if (part["audio_url"].is_object() && part["audio_url"].contains("url") && part["audio_url"]["url"].is_string()) {
+            aud_src = part["audio_url"]["url"].get<std::string>();
+          }
+        }
+        if (!aud_src.empty()) {
+          bool is_temp = false;
+          std::string path = save_audio_source_to_temp_file(aud_src, "", is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "audio"}, {"path", path}});
+          }
+        }
+      } else if (type == "audio") {
+        std::string aud_src = "";
+        std::string aud_fmt = part.contains("format") && part["format"].is_string() ? part["format"].get<std::string>() : "";
+        if (part.contains("path") && part["path"].is_string()) {
+          aud_src = part["path"].get<std::string>();
+        } else if (part.contains("blob") && part["blob"].is_string()) {
+          aud_src = part["blob"].get<std::string>();
+        } else if (part.contains("data") && part["data"].is_string()) {
+          aud_src = part["data"].get<std::string>();
+        } else if (part.contains("url") && part["url"].is_string()) {
+          aud_src = part["url"].get<std::string>();
+        }
+        if (!aud_src.empty()) {
+          bool is_temp = false;
+          std::string path = save_audio_source_to_temp_file(aud_src, aud_fmt, is_temp);
+          if (!path.empty()) {
+            if (is_temp) temp_files->paths.push_back(path);
+            content_arr.push_back({{"type", "audio"}, {"path", path}});
           }
         }
       }
@@ -499,7 +592,7 @@ static std::string extract_message_text(const json &msg) {
 }
 
 // UTF-8 경계를 유지하며 텍스트가 지정된 토큰 예산 이하가 되도록 잘라냄 (keep_tail=true이면 뒷부분 보존)
-static std::string truncate_utf8_to_token_budget(MultimodalCliApp &app, const std::string &text, int max_tok_budget, bool keep_tail = false) {
+static std::string truncate_utf8_to_token_budget(ILlmEngine &app, const std::string &text, int max_tok_budget, bool keep_tail = false) {
   if (text.empty() || max_tok_budget <= 0) return "";
   int cur_tok = app.CountTokens(text);
   if (cur_tok <= max_tok_budget) return text;
@@ -634,7 +727,7 @@ static json make_openai_model_info(const std::string &model_name) {
 }
 
 // API 서버 실행부 구현
-void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_name, EmbeddingEngineWrapper *emb_engine) {
+void RunServer(ILlmEngine &app, int port, const std::string &served_model_name, EmbeddingEngineWrapper *emb_engine) {
   httplib::Server svr;
   svr.set_read_timeout(600, 0);
   svr.set_write_timeout(600, 0);
@@ -1060,7 +1153,7 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       }
 
       // LiteRT-LM / Gemma 엔진은 시스템 토큰이 없으므로 첫 번째 user 메시지 앞단에 시스템 프롬프트 병합
-      if (!sys_msg.empty()) {
+      if (!sys_msg.empty() && !app.SupportsSystemRole()) {
         bool injected = false;
         for (auto &m : history_arr) {
           if (m.value("role", "") == "user") {
@@ -1842,7 +1935,7 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       std::string sys_msg = j_req.value("system", DEFAULT_SYSTEM_PROMPT);
 
       std::string effective_prompt = prompt;
-      if (!sys_msg.empty()) {
+      if (!sys_msg.empty() && !app.SupportsSystemRole()) {
         effective_prompt = sys_msg + "\n\n" + prompt;
       }
 
@@ -1856,15 +1949,32 @@ void RunServer(MultimodalCliApp &app, int port, const std::string &served_model_
       auto temp_files = std::make_shared<TempFilesCleanup>();
       json current_msg_j;
 
-      // 이미지 처리 (Base64 배열)
-      if (j_req.contains("images") && j_req["images"].is_array() && !j_req["images"].empty()) {
+      // 이미지 / 오디오 처리 (Base64 배열 등)
+      bool gen_has_images = j_req.contains("images") && j_req["images"].is_array() && !j_req["images"].empty();
+      bool gen_has_audios = j_req.contains("audios") && j_req["audios"].is_array() && !j_req["audios"].empty();
+      if (gen_has_images || gen_has_audios) {
         json content_arr = json::array();
-        for (const auto &img_b64 : j_req["images"]) {
-          if (img_b64.is_string()) {
-            std::string path = save_base64_to_temp_file(img_b64.get<std::string>());
-            if (!path.empty()) {
-              temp_files->paths.push_back(path);
-              content_arr.push_back({{"type", "image"}, {"path", path}});
+        if (gen_has_images) {
+          for (const auto &img_b64 : j_req["images"]) {
+            if (img_b64.is_string()) {
+              bool is_temp = false;
+              std::string path = save_image_source_to_temp_file(img_b64.get<std::string>(), is_temp);
+              if (!path.empty()) {
+                if (is_temp) temp_files->paths.push_back(path);
+                content_arr.push_back({{"type", "image"}, {"path", path}});
+              }
+            }
+          }
+        }
+        if (gen_has_audios) {
+          for (const auto &aud_src : j_req["audios"]) {
+            if (aud_src.is_string()) {
+              bool is_temp = false;
+              std::string path = save_audio_source_to_temp_file(aud_src.get<std::string>(), "", is_temp);
+              if (!path.empty()) {
+                if (is_temp) temp_files->paths.push_back(path);
+                content_arr.push_back({{"type", "audio"}, {"path", path}});
+              }
             }
           }
         }

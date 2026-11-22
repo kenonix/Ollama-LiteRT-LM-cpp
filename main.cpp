@@ -1,7 +1,9 @@
 #include "server_mode.h"
 #include "llm_engine.h"
+#include "llama_engine.h"
 #include "embedding_engine.h"
 #include <iostream>
+#include <memory>
 
 void print_help(const char *prog_name) {
   std::cout << "LiteRT-LM Multimodal CLI\n\n"
@@ -71,8 +73,21 @@ int main(int argc, char *argv[]) {
   }
 
   try {
-    // LLM 엔진 앱 인스턴스 초기화
-    MultimodalCliApp app(model_path, "", use_gpu, max_tokens, enable_mtp);
+    // 모델 포맷(.gguf 여부) 자동 감지 및 해당 백엔드 초기화
+    bool is_gguf = (model_path.size() >= 5 && model_path.substr(model_path.size() - 5) == ".gguf");
+    std::unique_ptr<ILlmEngine> app;
+
+    if (is_gguf) {
+#ifdef HAS_LLAMA_CPP
+      std::cout << "[시스템] GGUF 모델 감지 -> llama.cpp 엔진 백엔드 활성화" << std::endl;
+      app = std::make_unique<LlamaCppEngine>(model_path, max_tokens, use_gpu, 99, enable_mtp);
+#else
+      throw std::runtime_error("GGUF 모델이 지정되었으나 컴파일 시 llama.cpp가 포함되지 않았습니다.");
+#endif
+    } else {
+      std::cout << "[시스템] LiteRT-LM 모델 감지 -> LiteRT-LM 엔진 백엔드 활성화" << std::endl;
+      app = std::make_unique<MultimodalCliApp>(model_path, "", use_gpu, max_tokens, enable_mtp);
+    }
 
     // EmbeddingGemma 2 임베딩 엔진 초기화
     EmbeddingEngineWrapper emb_engine;
@@ -85,7 +100,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    RunServer(app, port, model_name, emb_engine.IsLoaded() ? &emb_engine : nullptr);
+    RunServer(*app, port, model_name, emb_engine.IsLoaded() ? &emb_engine : nullptr);
   } catch (const std::exception &e) {
     // 예외 발생 시 치명적 오류 메시지 출력
     std::cerr << "[치명적 예외] " << e.what() << std::endl;

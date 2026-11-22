@@ -1,5 +1,6 @@
 # Model and Cache files
 *.litertlm
+*.gguf
 *.bin
 *.xnnpack_cache*
 *_cache*

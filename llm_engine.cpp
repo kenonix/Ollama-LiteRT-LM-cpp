@@ -55,22 +55,6 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
   std::cout << "[시스템] 모델 로딩 중 (" << (use_gpu ? "GPU 가속" : "CPU") 
             << ", Max Tokens: " << max_tokens_ 
             << (enable_mtp ? ", MTP 활성화" : ", MTP 비활성화") << ")..." << std::endl;
-  // 엔진 설정 생성 (GPU/CPU 분기 설정)
-  const char* backend = use_gpu ? "gpu" : "cpu";
-  LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
-      model_path.c_str(), backend, backend, nullptr);
-  if (!settings)
-    throw std::runtime_error("엔진 설정 생성 실패");
-
-  // RAM 과도 사용 방지 최적화
-  litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens_);
-  litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
-  litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
-
-  if (enable_mtp) {
-    std::cout << "[시스템] MTP(Multi-Token Prediction / Speculative Decoding) 활성화 설정 적용..." << std::endl;
-    litert_lm_engine_settings_set_enable_speculative_decoding(settings, true);
-  }
 
   // 디스패치 라이브러리 경로 (아키텍처별 경로 우선 확인)
   std::string dispatch_dir = "./lib";
@@ -79,17 +63,32 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
 #elif defined(__x86_64__)
   if (access("./lib/x86_64", F_OK) == 0) dispatch_dir = "./lib/x86_64";
 #endif
-  litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, dispatch_dir.c_str());
 
-  // 엔진 인스턴스 생성
-  engine_ = litert_lm_engine_create(settings);
-  litert_lm_engine_settings_delete(settings);
-  if (!engine_)
-    throw std::runtime_error("엔진 생성 실패");
+  const char* backend = use_gpu ? "gpu" : "cpu";
 
-  // 첫 요청 시 30초 이상 걸리는 비전/샘플러/WebGPU 셰이더 지연을 방지하기 위해 시작 시 1토큰 워밍업 수행
-  std::cout << "[시스템] GPU 파이프라인 및 세션 워밍업 중..." << std::endl;
-  {
+  auto create_engine_with_audio = [&](const char* audio_backend) -> LiteRtLmEngine* {
+    LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
+        model_path.c_str(), backend, backend, audio_backend);
+    if (!settings) return nullptr;
+
+    // RAM 과도 사용 방지 최적화
+    litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens_);
+    litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
+    litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
+
+    if (enable_mtp) {
+      litert_lm_engine_settings_set_enable_speculative_decoding(settings, true);
+    }
+
+    litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, dispatch_dir.c_str());
+
+    LiteRtLmEngine *eng = litert_lm_engine_create(settings);
+    litert_lm_engine_settings_delete(settings);
+    return eng;
+  };
+
+  auto run_warmup = [&](LiteRtLmEngine *eng) -> bool {
+    if (!eng) return false;
     LiteRtLmSessionConfig *warmup_sc = litert_lm_session_config_create();
     if (warmup_sc) {
       litert_lm_session_config_set_max_output_tokens(warmup_sc, 1);
@@ -108,22 +107,69 @@ MultimodalCliApp::MultimodalCliApp(const std::string &model_path, const std::str
     }
     if (warmup_sc) litert_lm_session_config_delete(warmup_sc);
 
-    LiteRtLmConversation *warmup_conv = litert_lm_conversation_create(engine_, warmup_cc);
+    LiteRtLmConversation *warmup_conv = litert_lm_conversation_create(eng, warmup_cc);
     if (warmup_cc) litert_lm_conversation_config_delete(warmup_cc);
-    if (warmup_conv) {
-      LiteRtLmConversationOptionalArgs *warmup_opt = litert_lm_conversation_optional_args_create();
-      if (warmup_opt) {
-        litert_lm_conversation_optional_args_set_max_output_tokens(warmup_opt, 1);
+    if (!warmup_conv) return false;
+
+    LiteRtLmConversationOptionalArgs *warmup_opt = litert_lm_conversation_optional_args_create();
+    if (warmup_opt) {
+      litert_lm_conversation_optional_args_set_max_output_tokens(warmup_opt, 1);
+    }
+    LiteRtLmJsonResponse *w_res = litert_lm_conversation_send_message(
+        warmup_conv, "{\"role\":\"user\",\"content\":\"hi\"}", nullptr, warmup_opt);
+    if (w_res) litert_lm_json_response_delete(w_res);
+    if (warmup_opt) litert_lm_conversation_optional_args_delete(warmup_opt);
+    litert_lm_conversation_delete(warmup_conv);
+    return true;
+  };
+
+  if (enable_mtp) {
+    std::cout << "[시스템] MTP(Multi-Token Prediction / Speculative Decoding) 활성화 설정 적용..." << std::endl;
+  }
+
+  // .litertlm 헤더(상위 64KB)에서 오디오 인코더 섹션 존재 여부를 사전 판별하여 미지원 모델의 중복 로딩 방지
+  bool model_has_audio_section = false;
+  {
+    std::ifstream mf(model_path, std::ios::binary);
+    if (mf.is_open()) {
+      std::string header_buf(65536, '\0');
+      mf.read(&header_buf[0], static_cast<std::streamsize>(header_buf.size()));
+      header_buf.resize(static_cast<size_t>(mf.gcount()));
+      if (header_buf.find("tf_lite_audio_encoder") != std::string::npos) {
+        model_has_audio_section = true;
       }
-      LiteRtLmJsonResponse *w_res = litert_lm_conversation_send_message(
-          warmup_conv, "{\"role\":\"user\",\"content\":\"hi\"}", nullptr, warmup_opt);
-      if (w_res) litert_lm_json_response_delete(w_res);
-      if (warmup_opt) litert_lm_conversation_optional_args_delete(warmup_opt);
-      litert_lm_conversation_delete(warmup_conv);
     }
   }
 
-  std::cout << "[시스템] 준비 완료!" << std::endl;
+  // Gemma 4 등의 오디오 인코더/어댑터는 backend_constraint가 "cpu"로 고정되어 있으므로 audio_backend="cpu"로 초기화
+  if (model_has_audio_section) {
+    std::cout << "[시스템] 오디오 인코더 감지 -> 오디오 모달리티(CPU 백엔드) 포함 엔진 초기화 중..." << std::endl;
+    engine_ = create_engine_with_audio("cpu");
+    if (engine_) {
+      std::cout << "[시스템] 파이프라인 및 세션 워밍업 중..." << std::endl;
+      if (run_warmup(engine_)) {
+        audio_enabled_ = true;
+        std::cout << "[시스템] 오디오 모달리티 활성화 완료!" << std::endl;
+      } else {
+        std::cout << "[시스템] 오디오 세션 워밍업 실패 -> 오디오 비활성화 모드로 재초기화합니다..." << std::endl;
+        litert_lm_engine_delete(engine_);
+        engine_ = nullptr;
+      }
+    } else {
+      std::cout << "[시스템] 오디오 백엔드 포함 초기화 실패 -> 오디오 비활성화 모드로 재시도합니다..." << std::endl;
+    }
+  }
+
+  if (!engine_) {
+    engine_ = create_engine_with_audio(nullptr);
+    if (!engine_)
+      throw std::runtime_error("엔진 생성 실패");
+    std::cout << "[시스템] GPU/CPU 파이프라인 및 세션 워밍업 중..." << std::endl;
+    run_warmup(engine_);
+    audio_enabled_ = false;
+  }
+
+  std::cout << "[시스템] 준비 완료! (오디오 입력: " << (audio_enabled_ ? "지원" : "미지원") << ")" << std::endl;
 }
 
 // 소멸자: LiteRT-LM 엔진 자원 해제
