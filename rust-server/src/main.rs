@@ -10,12 +10,12 @@ use crate::engine::litert::LiteRtEngine;
 #[cfg(has_llama_cpp)]
 use crate::engine::llama::LlamaEngine;
 use crate::engine::LlmEngine;
-use crate::server::{build_router, AppState};
+use crate::server::{build_router, AppState, EngineFactory, EngineRuntimeInfo};
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use std::fs;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -77,31 +77,38 @@ async fn main() -> Result<()> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
 
-    let is_gguf = cli.model_path.ends_with(".gguf");
-    let llm_engine: Arc<dyn LlmEngine> = if is_gguf {
-        #[cfg(has_llama_cpp)]
-        {
-            println!("[시스템] GGUF 모델 감지 -> llama.cpp 엔진 백엔드 활성화");
-            Arc::new(LlamaEngine::new(
-                &cli.model_path,
-                cli.max_tokens,
-                cli.gpu,
-                99,
-                cli.mtp,
-            )?)
+    let model_path = cli.model_path.clone();
+    let use_gpu = cli.gpu;
+    let enable_mtp = cli.mtp;
+    let engine_factory: EngineFactory = Arc::new(move |max_tokens: usize| -> Result<Arc<dyn LlmEngine>> {
+        let is_gguf = model_path.ends_with(".gguf");
+        if is_gguf {
+            #[cfg(has_llama_cpp)]
+            {
+                println!("[시스템] GGUF 모델 감지 -> llama.cpp 엔진 백엔드 활성화 (Max Tokens: {})", max_tokens);
+                Ok(Arc::new(LlamaEngine::new(
+                    &model_path,
+                    max_tokens,
+                    use_gpu,
+                    99,
+                    enable_mtp,
+                )?))
+            }
+            #[cfg(not(has_llama_cpp))]
+            {
+                Err(anyhow!(
+                    "GGUF 모델이 지정되었으나 빌드 시 llama.cpp가 감지되지 않았습니다."
+                ))
+            }
+        } else {
+            println!("[시스템] LiteRT-LM 모델 감지 -> LiteRT-LM 엔진 백엔드 활성화 (Max Tokens: {})", max_tokens);
+            let eng = LiteRtEngine::new(&model_path, use_gpu, max_tokens, enable_mtp)?;
+            let _ = eng.audio_enabled();
+            Ok(Arc::new(eng))
         }
-        #[cfg(not(has_llama_cpp))]
-        {
-            return Err(anyhow!(
-                "GGUF 모델이 지정되었으나 빌드 시 llama.cpp가 감지되지 않았습니다."
-            ));
-        }
-    } else {
-        println!("[시스템] LiteRT-LM 모델 감지 -> LiteRT-LM 엔진 백엔드 활성화");
-        let eng = LiteRtEngine::new(&cli.model_path, cli.gpu, cli.max_tokens, cli.mtp)?;
-        let _ = eng.audio_enabled();
-        Arc::new(eng)
-    };
+    });
+
+    let llm_engine = (engine_factory)(cli.max_tokens)?;
 
     let emb_engine = if !cli.no_embedding {
         if let Some(path) =
@@ -117,7 +124,14 @@ async fn main() -> Result<()> {
     };
 
     let state = Arc::new(AppState {
-        engine: llm_engine,
+        engine: RwLock::new(Some(llm_engine)),
+        engine_factory,
+        reload_lock: tokio::sync::Mutex::new(()),
+        runtime_info: EngineRuntimeInfo {
+            model_path: cli.model_path.clone(),
+            use_gpu: cli.gpu,
+            enable_mtp: cli.mtp,
+        },
         emb_engine,
         served_model_name: cli.model_name.clone(),
         default_system_prompt,

@@ -4,32 +4,116 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MODEL="${1:-$REPO_ROOT/gemma-4-E4B-it.litertlm}"
+if [ -f "$REPO_ROOT/gemma-4-E4B-it-gpu.litertlm" ]; then
+    DEFAULT_MODEL="$REPO_ROOT/gemma-4-E4B-it-gpu.litertlm"
+else
+    DEFAULT_MODEL="$REPO_ROOT/gemma-4-E4B-it.litertlm"
+fi
+
+MODEL="$DEFAULT_MODEL"
 PORT="${PORT:-11434}"
-# Jetson Orin (7.4 GiB 통합 메모리) + LiteRT-LM 0.19.2 / ai-edge-litert 2.4.0 실측 기준:
-# - 4096: WebGPU 긴 컨텍스트(2.5K~3K+ 멀티턴 입력)에서 한국어 맞춤법/품질 100% 정상 + MTP 가속 안정
-# - 6144~8192 이상: WebGPU KV 캐시 리사이징 구간에서 긴 입력(2.5K~3K+) 시 음절 중복/맞춤법 붕괴 발생
-MAX_TOKENS="${MAX_TOKENS:-4096}"
+# GPU 전용 모델(gemma-4-E4B-it-gpu.litertlm) 실측 기준:
+# - 8192 / 10240 / 12288 / 16384 모두 WebGPU 오류 0건, 가용 RAM ~1.66 GiB, 한국어 품질 100% 정상
+MAX_TOKENS="${MAX_TOKENS:-16384}"
 MODEL_NAME="${MODEL_NAME:-gemma4-e4b:latest}"
 ENABLE_MTP="${ENABLE_MTP:-1}"
-# E4B(3.5GB) + Vision + Audio + KV 캐시 여유 메모리 확보를 위해 기본 비활성화 (필요 시 ENABLE_EMBEDDING=1)
 ENABLE_EMBEDDING="${ENABLE_EMBEDDING:-0}"
+
+usage() {
+    cat <<EOF
+사용법: $0 [옵션] [모델_경로]
+
+옵션:
+  -t, --max-tokens, --num-ctx N   KV 캐시 최대 토큰 할당량 (기본: ${MAX_TOKENS}, 환경변수 MAX_TOKENS 지원)
+  -p, --port PORT                 HTTP 서버 포트 (기본: ${PORT}, 환경변수 PORT 지원)
+  -n, --model-name NAME           API 노출 모델명 (기본: ${MODEL_NAME})
+  -m, --model PATH                모델 파일 경로 (기본: ${DEFAULT_MODEL})
+      --mtp / --no-mtp            MTP 추측 디코딩 켜기/끄기 (기본: ON)
+      --embedding / --no-embedding 임베딩 엔진 켜기/끄기 (기본: OFF)
+  -h, --help                      도움말 출력
+
+실행 중 외부에서 토큰 할당량 변경:
+  GET  http://<host>:${PORT}/api/config
+  POST http://<host>:${PORT}/api/config/max-tokens  -d '{"max_tokens": 8192}'
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -t|--max-tokens|--num-ctx)
+            MAX_TOKENS="$2"
+            shift 2
+            ;;
+        --max-tokens=*|--num-ctx=*)
+            MAX_TOKENS="${1#*=}"
+            shift
+            ;;
+        -p|--port)
+            PORT="$2"
+            shift 2
+            ;;
+        --port=*)
+            PORT="${1#*=}"
+            shift
+            ;;
+        -n|--model-name)
+            MODEL_NAME="$2"
+            shift 2
+            ;;
+        --model-name=*)
+            MODEL_NAME="${1#*=}"
+            shift
+            ;;
+        -m|--model)
+            MODEL="$2"
+            shift 2
+            ;;
+        --model=*)
+            MODEL="${1#*=}"
+            shift
+            ;;
+        --mtp)
+            ENABLE_MTP="1"
+            shift
+            ;;
+        --no-mtp)
+            ENABLE_MTP="0"
+            shift
+            ;;
+        --embedding)
+            ENABLE_EMBEDDING="1"
+            shift
+            ;;
+        --no-embedding)
+            ENABLE_EMBEDDING="0"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "❌ [오류] 알 수 없는 옵션: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            MODEL="$1"
+            shift
+            ;;
+    esac
+done
 
 if [ ! -f "$MODEL" ]; then
     echo "❌ [오류] 모델 파일을 찾을 수 없습니다: $MODEL"
     exit 1
 fi
 
-if [ "$MAX_TOKENS" -gt 4096 ] 2>/dev/null; then
-    echo "⚠️  [경고] MAX_TOKENS=${MAX_TOKENS}는 WebGPU 한국어 품질 안정 상한(4096)을 초과합니다."
-    echo "    6144~8192 이상에서는 긴 컨텍스트 입력 시 음절 중복 및 맞춤법 붕괴가 발생할 수 있습니다."
-fi
-
 # 포트 충돌 사전 감지
 if ss -tulpn 2>/dev/null | grep -q ":${PORT}[[:space:]]"; then
     echo "⚠️  [경고] 포트 ${PORT} 번이 이미 사용 중입니다!"
     echo "    1) 기존 Ollama 중지: sudo systemctl stop ollama"
-    echo "    2) 다른 포트로 실행: PORT=11435 $0"
+    echo "    2) 다른 포트로 실행: $0 --port 11435"
     exit 1
 fi
 
@@ -75,6 +159,7 @@ echo "  포트       : $PORT"
 echo "  컨텍스트   : $MAX_TOKENS 토큰 (Vision + Audio 활성화)"
 echo "  MTP 가속   : $([ "$ENABLE_MTP" = "1" ] && echo 'ON' || echo 'OFF')"
 echo "  임베딩     : $([ "$ENABLE_EMBEDDING" = "1" ] && echo 'ON' || echo 'OFF (VRAM/RAM 절약)')"
+echo "  동적 변경  : POST http://0.0.0.0:${PORT}/api/config/max-tokens"
 echo "============================================================"
 
 exec "$BIN" "${ARGS[@]}"
