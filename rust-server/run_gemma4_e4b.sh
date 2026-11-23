@@ -127,8 +127,8 @@ else
 fi
 
 BIN="$SCRIPT_DIR/target/release/ollama-litert-lm-rs"
-if [ ! -f "$BIN" ]; then
-    echo "[빌드] Release 바이너리가 없어 cargo build --release를 실행합니다..."
+if [ ! -f "$BIN" ] || [ -n "$(find "$SCRIPT_DIR/src" "$SCRIPT_DIR/Cargo.toml" -newer "$BIN" 2>/dev/null)" ]; then
+    echo "[빌드] Release 바이너리가 없거나 소스가 변경되어 cargo build --release를 실행합니다..."
     (cd "$SCRIPT_DIR" && cargo build --release)
 fi
 
