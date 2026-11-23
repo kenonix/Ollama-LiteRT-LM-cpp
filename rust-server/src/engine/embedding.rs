@@ -1,6 +1,6 @@
 use super::litert_ffi::{
     litert_lm_input_data_create, litert_lm_input_data_delete, LiteRtLmInputData,
-    INPUT_DATA_TYPE_TEXT,
+    INPUT_DATA_TYPE_TEXT, STATUS_OK,
 };
 use libc::{c_char, c_float, c_int, c_void, dlsym, size_t, RTLD_DEFAULT};
 use std::ffi::CString;
@@ -32,26 +32,32 @@ type FnSettingsCreate = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
     *const c_char,
-) -> *mut LiteRtLmEmbeddingEngineSettings;
+    *mut *mut LiteRtLmEmbeddingEngineSettings,
+) -> c_int;
 type FnSettingsDelete = unsafe extern "C" fn(*mut LiteRtLmEmbeddingEngineSettings);
 type FnSettingsSetCacheDir =
-    unsafe extern "C" fn(*mut LiteRtLmEmbeddingEngineSettings, *const c_char);
-type FnEngineCreate =
-    unsafe extern "C" fn(*mut LiteRtLmEmbeddingEngineSettings) -> *mut LiteRtLmEmbeddingEngine;
+    unsafe extern "C" fn(*mut LiteRtLmEmbeddingEngineSettings, *const c_char) -> c_int;
+type FnEngineCreate = unsafe extern "C" fn(
+    *const LiteRtLmEmbeddingEngineSettings,
+    *mut *mut LiteRtLmEmbeddingEngine,
+) -> c_int;
 type FnEngineDelete = unsafe extern "C" fn(*mut LiteRtLmEmbeddingEngine);
-type FnOptionsCreate = unsafe extern "C" fn() -> *mut LiteRtLmEmbeddingOptions;
+type FnOptionsCreate = unsafe extern "C" fn(*mut *mut LiteRtLmEmbeddingOptions) -> c_int;
 type FnOptionsDelete = unsafe extern "C" fn(*mut LiteRtLmEmbeddingOptions);
-type FnOptionsSetNormalize = unsafe extern "C" fn(*mut LiteRtLmEmbeddingOptions, bool);
-type FnOptionsSetOutputSize = unsafe extern "C" fn(*mut LiteRtLmEmbeddingOptions, c_int);
+type FnOptionsSetNormalize = unsafe extern "C" fn(*mut LiteRtLmEmbeddingOptions, bool) -> c_int;
+type FnOptionsSetOutputSize = unsafe extern "C" fn(*mut LiteRtLmEmbeddingOptions, c_int) -> c_int;
 type FnComputeEmbedding = unsafe extern "C" fn(
     *mut LiteRtLmEmbeddingEngine,
-    *mut *mut LiteRtLmInputData,
+    *const *const LiteRtLmInputData,
     size_t,
-    *mut LiteRtLmEmbeddingOptions,
-) -> *mut LiteRtLmEmbeddingResponse;
+    *const LiteRtLmEmbeddingOptions,
+    *mut *mut LiteRtLmEmbeddingResponse,
+) -> c_int;
 type FnResponseDelete = unsafe extern "C" fn(*mut LiteRtLmEmbeddingResponse);
-type FnResponseGetSize = unsafe extern "C" fn(*mut LiteRtLmEmbeddingResponse) -> size_t;
-type FnResponseGetValues = unsafe extern "C" fn(*mut LiteRtLmEmbeddingResponse) -> *const c_float;
+type FnResponseGetSize =
+    unsafe extern "C" fn(*const LiteRtLmEmbeddingResponse, *mut size_t) -> c_int;
+type FnResponseGetValues =
+    unsafe extern "C" fn(*const LiteRtLmEmbeddingResponse, *mut *const c_float) -> c_int;
 
 struct EmbeddingApi {
     settings_create: FnSettingsCreate,
@@ -175,21 +181,29 @@ impl EmbeddingEngine {
         let cache_c = CString::new(".").ok()?;
 
         let eng = unsafe {
-            let settings = (api.settings_create)(
+            let mut settings: *mut LiteRtLmEmbeddingEngineSettings = ptr::null_mut();
+            if (api.settings_create)(
                 model_c.as_ptr(),
                 backend_c.as_ptr(),
                 ptr::null(),
                 ptr::null(),
-            );
-            if settings.is_null() {
+                &mut settings,
+            ) != STATUS_OK
+                || settings.is_null()
+            {
                 return None;
             }
             if let Some(set_cache) = api.settings_set_cache_dir {
-                set_cache(settings, cache_c.as_ptr());
+                let _ = set_cache(settings, cache_c.as_ptr());
             }
-            let eng = (api.engine_create)(settings);
+            let mut eng: *mut LiteRtLmEmbeddingEngine = ptr::null_mut();
+            let st = (api.engine_create)(settings, &mut eng);
             (api.settings_delete)(settings);
-            eng
+            if st != STATUS_OK {
+                ptr::null_mut()
+            } else {
+                eng
+            }
         };
 
         if eng.is_null() {
@@ -213,32 +227,40 @@ impl EmbeddingEngine {
         let input_text = if text.is_empty() { " " } else { text };
 
         unsafe {
-            let input_data = litert_lm_input_data_create(
+            let mut input_data: *mut LiteRtLmInputData = ptr::null_mut();
+            if litert_lm_input_data_create(
                 INPUT_DATA_TYPE_TEXT,
                 input_text.as_ptr() as *const c_void,
                 input_text.len(),
-            );
-            if input_data.is_null() {
+                &mut input_data,
+            ) != STATUS_OK
+                || input_data.is_null()
+            {
                 return Vec::new();
             }
-            let options = (api.options_create)();
-            if options.is_null() {
+            let mut options: *mut LiteRtLmEmbeddingOptions = ptr::null_mut();
+            if (api.options_create)(&mut options) != STATUS_OK || options.is_null() {
                 litert_lm_input_data_delete(input_data);
                 return Vec::new();
             }
-            (api.options_set_normalize)(options, normalize);
+            let _ = (api.options_set_normalize)(options, normalize);
             if output_size > 0 {
                 if let Some(set_out) = api.options_set_output_size {
-                    set_out(options, output_size);
+                    let _ = set_out(options, output_size);
                 }
             }
-            let mut inputs = [input_data];
-            let resp = (api.compute_embedding)(guard.0, inputs.as_mut_ptr(), 1, options);
+            let inputs: [*const LiteRtLmInputData; 1] = [input_data];
+            let mut resp: *mut LiteRtLmEmbeddingResponse = ptr::null_mut();
+            let st = (api.compute_embedding)(guard.0, inputs.as_ptr(), 1, options, &mut resp);
             let mut result = Vec::new();
-            if !resp.is_null() {
-                let dim = (api.response_get_size)(resp);
-                let vals = (api.response_get_values)(resp);
-                if dim > 0 && !vals.is_null() {
+            if st == STATUS_OK && !resp.is_null() {
+                let mut dim: size_t = 0;
+                let mut vals: *const c_float = ptr::null();
+                if (api.response_get_size)(resp, &mut dim) == STATUS_OK
+                    && (api.response_get_values)(resp, &mut vals) == STATUS_OK
+                    && dim > 0
+                    && !vals.is_null()
+                {
                     result.extend_from_slice(std::slice::from_raw_parts(vals, dim));
                 }
                 (api.response_delete)(resp);

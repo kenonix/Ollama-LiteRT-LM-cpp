@@ -76,6 +76,7 @@ private:
   std::string system_prompt_;        // 활성화된 시스템 프롬프트
   int max_tokens_ = 2048;            // 최대 토큰 수
   bool audio_enabled_ = false;       // 오디오 입력(모달리티) 활성화 여부
+  bool supports_system_role_ = false; // 네이티브 system 역할 지원 여부
   std::recursive_mutex engine_mutex_; // 엔진 호출 직렬화 뮤텍스 (재귀적 잠금 지원)
   std::mutex tokenizer_mutex_;        // 토크나이저 전용 뮤텍스 (생성 중 블로킹 방지)
 
@@ -87,6 +88,9 @@ public:
 
   // 최대 토큰 한도 조회
   int GetMaxTokens() const override { return max_tokens_; }
+
+  // 시스템 역할 직접 지원 여부 (엔진 초기화 시 템플릿 자동 감지)
+  bool SupportsSystemRole() const override { return supports_system_role_; }
 
   // 텍스트 토큰 수 계산 (정확한 사용량 산출)
   int CountTokens(const std::string &text) override;

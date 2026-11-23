@@ -8,35 +8,35 @@
 #include <cstdlib>
 #include <dlfcn.h>
 
-// LiteRT-LM C API 타입 및 동적 함수 포인터 정의 (다양한 플랫폼 및 구버전 라이브러리 링크 호환성 보장)
 extern "C" {
 typedef struct LiteRtLmEmbeddingEngine LiteRtLmEmbeddingEngine;
 typedef struct LiteRtLmEmbeddingEngineSettings LiteRtLmEmbeddingEngineSettings;
 typedef struct LiteRtLmEmbeddingOptions LiteRtLmEmbeddingOptions;
 typedef struct LiteRtLmEmbeddingResponse LiteRtLmEmbeddingResponse;
 
-typedef LiteRtLmEmbeddingEngineSettings* (*Fn_settings_create)(const char*, const char*, const char*, const char*);
+typedef LiteRtLmStatusCode (*Fn_settings_create)(const char*, const char*, const char*, const char*, LiteRtLmEmbeddingEngineSettings**);
 typedef void (*Fn_settings_delete)(LiteRtLmEmbeddingEngineSettings*);
-typedef void (*Fn_settings_set_cache_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
-typedef void (*Fn_settings_set_litert_dispatch_lib_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
+typedef LiteRtLmStatusCode (*Fn_settings_set_cache_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
+typedef LiteRtLmStatusCode (*Fn_settings_set_litert_dispatch_lib_dir)(LiteRtLmEmbeddingEngineSettings*, const char*);
 
-typedef LiteRtLmEmbeddingEngine* (*Fn_engine_create)(LiteRtLmEmbeddingEngineSettings*);
+typedef LiteRtLmStatusCode (*Fn_engine_create)(const LiteRtLmEmbeddingEngineSettings*, LiteRtLmEmbeddingEngine**);
 typedef void (*Fn_engine_delete)(LiteRtLmEmbeddingEngine*);
 
-typedef LiteRtLmEmbeddingOptions* (*Fn_options_create)();
+typedef LiteRtLmStatusCode (*Fn_options_create)(LiteRtLmEmbeddingOptions**);
 typedef void (*Fn_options_delete)(LiteRtLmEmbeddingOptions*);
-typedef void (*Fn_options_set_normalize)(LiteRtLmEmbeddingOptions*, bool);
-typedef void (*Fn_options_set_output_size)(LiteRtLmEmbeddingOptions*, int);
+typedef LiteRtLmStatusCode (*Fn_options_set_normalize)(LiteRtLmEmbeddingOptions*, bool);
+typedef LiteRtLmStatusCode (*Fn_options_set_output_size)(LiteRtLmEmbeddingOptions*, int);
 
-typedef LiteRtLmEmbeddingResponse* (*Fn_compute_embedding)(
+typedef LiteRtLmStatusCode (*Fn_compute_embedding)(
     LiteRtLmEmbeddingEngine*,
-    LiteRtLmInputData**,
+    const LiteRtLmInputData* const*,
     size_t,
-    LiteRtLmEmbeddingOptions*
+    const LiteRtLmEmbeddingOptions*,
+    LiteRtLmEmbeddingResponse**
 );
 typedef void (*Fn_response_delete)(LiteRtLmEmbeddingResponse*);
-typedef size_t (*Fn_response_get_size)(LiteRtLmEmbeddingResponse*);
-typedef const float* (*Fn_response_get_values)(LiteRtLmEmbeddingResponse*);
+typedef LiteRtLmStatusCode (*Fn_response_get_size)(const LiteRtLmEmbeddingResponse*, size_t*);
+typedef LiteRtLmStatusCode (*Fn_response_get_values)(const LiteRtLmEmbeddingResponse*, const float**);
 }
 
 struct EmbeddingApiSymbols {
@@ -133,7 +133,6 @@ std::string EmbeddingEngineWrapper::EnsureModelAvailable(const std::string &pref
         }
     }
 
-    // 모델 파일이 없는 경우 자동 다운로드 시도
     std::string target_path = "./embeddinggemma-2-text-270m.litertlm";
     std::string download_url = "https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/main/embeddinggemma-2-text-270m.litertlm";
 
@@ -171,13 +170,13 @@ bool EmbeddingEngineWrapper::Initialize(const std::string &model_path, const std
 
     std::cout << "[임베딩] 엔진 초기화 중 (백엔드: " << backend << ", 모델: " << model_path << ")..." << std::endl;
 
-    auto* settings = api.settings_create(
-        model_path.c_str(),
-        backend.c_str(),
-        nullptr,
-        nullptr
-    );
-    if (!settings) {
+    LiteRtLmEmbeddingEngineSettings* settings = nullptr;
+    if (api.settings_create(
+            model_path.c_str(),
+            backend.c_str(),
+            nullptr,
+            nullptr,
+            &settings) != kLiteRtLmStatusOk || !settings) {
         std::cerr << "[임베딩] 설정 생성 실패" << std::endl;
         return false;
     }
@@ -186,11 +185,12 @@ bool EmbeddingEngineWrapper::Initialize(const std::string &model_path, const std
         api.settings_set_cache_dir(settings, ".");
     }
 
-    impl_->engine = api.engine_create(settings);
+    LiteRtLmStatusCode st = api.engine_create(settings, &impl_->engine);
     api.settings_delete(settings);
 
-    if (!impl_->engine) {
+    if (st != kLiteRtLmStatusOk || !impl_->engine) {
         std::cerr << "[임베딩] LiteRT-LM EmbeddingEngine 생성 실패" << std::endl;
+        impl_->engine = nullptr;
         return false;
     }
 
@@ -223,17 +223,17 @@ std::vector<float> EmbeddingEngineWrapper::ComputeEmbedding(const std::string &t
         input_text = " ";
     }
 
-    LiteRtLmInputData* input_data = litert_lm_input_data_create(
-        kLiteRtLmInputDataTypeText,
-        input_text.data(),
-        input_text.size()
-    );
-    if (!input_data) {
+    LiteRtLmInputData* input_data = nullptr;
+    if (litert_lm_input_data_create(
+            kLiteRtLmInputDataTypeText,
+            input_text.data(),
+            input_text.size(),
+            &input_data) != kLiteRtLmStatusOk || !input_data) {
         return {};
     }
 
-    auto* options = api.options_create();
-    if (!options) {
+    LiteRtLmEmbeddingOptions* options = nullptr;
+    if (api.options_create(&options) != kLiteRtLmStatusOk || !options) {
         litert_lm_input_data_delete(input_data);
         return {};
     }
@@ -243,14 +243,17 @@ std::vector<float> EmbeddingEngineWrapper::ComputeEmbedding(const std::string &t
         api.options_set_output_size(options, output_size);
     }
 
-    LiteRtLmInputData* inputs[] = { input_data };
-    auto* resp = api.compute_embedding(impl_->engine, inputs, 1, options);
+    const LiteRtLmInputData* inputs[] = { input_data };
+    LiteRtLmEmbeddingResponse* resp = nullptr;
+    LiteRtLmStatusCode st = api.compute_embedding(impl_->engine, inputs, 1, options, &resp);
 
     std::vector<float> result;
-    if (resp) {
-        size_t dim = api.response_get_size(resp);
-        const float* vals = api.response_get_values(resp);
-        if (dim > 0 && vals != nullptr) {
+    if (st == kLiteRtLmStatusOk && resp) {
+        size_t dim = 0;
+        const float* vals = nullptr;
+        if (api.response_get_size(resp, &dim) == kLiteRtLmStatusOk &&
+            api.response_get_values(resp, &vals) == kLiteRtLmStatusOk &&
+            dim > 0 && vals != nullptr) {
             result.assign(vals, vals + dim);
         }
         api.response_delete(resp);

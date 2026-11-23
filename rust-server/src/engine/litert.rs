@@ -15,6 +15,15 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+unsafe fn last_error_string() -> String {
+    let p = litert_lm_get_last_error_message();
+    if p.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+}
+
 pub fn extract_text_from_chunk(chunk: &str) -> String {
     if chunk.is_empty() {
         return String::new();
@@ -73,6 +82,39 @@ fn litertlm_has_audio_section(model_path: &str) -> bool {
     buf.windows(needle.len()).any(|w| w == needle)
 }
 
+unsafe fn probe_system_role_support(eng: *mut LiteRtLmEngine) -> bool {
+    if eng.is_null() {
+        return false;
+    }
+    let mut cc: *mut LiteRtLmConversationConfig = ptr::null_mut();
+    if litert_lm_conversation_config_create(&mut cc) != STATUS_OK || cc.is_null() {
+        return false;
+    }
+    let probe_marker = "__LITERT_SYS_ROLE_PROBE__";
+    let probe_json = json!(probe_marker).to_string();
+    if let Ok(probe_c) = CString::new(probe_json) {
+        litert_lm_conversation_config_set_system_message(cc, probe_c.as_ptr());
+    }
+    let mut conv: *mut LiteRtLmConversation = ptr::null_mut();
+    let st = litert_lm_conversation_create(eng, cc, &mut conv);
+    litert_lm_conversation_config_delete(cc);
+    if st != STATUS_OK || conv.is_null() {
+        return false;
+    }
+    let mut rendered_ptr: *const libc::c_char = ptr::null();
+    let supported = if litert_lm_conversation_render_preface_to_string(conv, &mut rendered_ptr)
+        == STATUS_OK
+        && !rendered_ptr.is_null()
+    {
+        let rendered = CStr::from_ptr(rendered_ptr).to_string_lossy();
+        rendered.contains(probe_marker)
+    } else {
+        false
+    };
+    litert_lm_conversation_delete(conv);
+    supported
+}
+
 struct SendEnginePtr(*mut LiteRtLmEngine);
 unsafe impl Send for SendEnginePtr {}
 unsafe impl Sync for SendEnginePtr {}
@@ -81,6 +123,7 @@ pub struct LiteRtEngine {
     engine: SendEnginePtr,
     max_tokens: usize,
     audio_enabled: bool,
+    supports_system_role: bool,
     infer_mutex: Mutex<()>,
     tokenizer_mutex: Mutex<()>,
 }
@@ -108,24 +151,48 @@ impl LiteRtEngine {
             let audio_c = audio_backend.and_then(|s| CString::new(s).ok());
             let audio_ptr = audio_c.as_ref().map_or(ptr::null(), |c| c.as_ptr());
             unsafe {
-                let settings = litert_lm_engine_settings_create(
+                let mut settings: *mut LiteRtLmEngineSettings = ptr::null_mut();
+                if litert_lm_engine_settings_create(
                     model_c.as_ptr(),
                     backend_c.as_ptr(),
                     backend_c.as_ptr(),
                     audio_ptr,
-                );
-                if settings.is_null() {
+                    &mut settings,
+                ) != STATUS_OK
+                    || settings.is_null()
+                {
+                    eprintln!("[경고] 엔진 설정 생성 실패: {}", last_error_string());
                     return ptr::null_mut();
                 }
                 litert_lm_engine_settings_set_max_num_tokens(settings, max_tokens as i32);
                 litert_lm_engine_settings_set_parallel_file_section_loading(settings, false);
                 litert_lm_engine_settings_set_use_ringbuffers_local_attention(settings, true);
                 if enable_mtp {
-                    litert_lm_engine_settings_set_enable_speculative_decoding(settings, true);
+                    let mut spec_cfg: *mut LiteRtLmSpeculativeDecodingConfig = ptr::null_mut();
+                    if litert_lm_speculative_decoding_config_create(&mut spec_cfg) == STATUS_OK
+                        && !spec_cfg.is_null()
+                    {
+                        litert_lm_speculative_decoding_config_set_mode(
+                            spec_cfg,
+                            SPECULATIVE_DECODING_MODE_ON,
+                        );
+                        litert_lm_engine_settings_set_speculative_decoding_config(
+                            settings, spec_cfg,
+                        );
+                        litert_lm_speculative_decoding_config_delete(spec_cfg);
+                    }
                 }
-                litert_lm_engine_settings_set_litert_dispatch_lib_dir(settings, dispatch_c.as_ptr());
-                let eng = litert_lm_engine_create(settings);
+                litert_lm_engine_settings_set_litert_dispatch_lib_dir(
+                    settings,
+                    dispatch_c.as_ptr(),
+                );
+                let mut eng: *mut LiteRtLmEngine = ptr::null_mut();
+                let st = litert_lm_engine_create(settings, &mut eng);
                 litert_lm_engine_settings_delete(settings);
+                if st != STATUS_OK {
+                    eprintln!("[경고] 엔진 생성 오류: {}", last_error_string());
+                    return ptr::null_mut();
+                }
                 eng
             }
         };
@@ -135,17 +202,23 @@ impl LiteRtEngine {
                 return false;
             }
             unsafe {
-                let warmup_sc = litert_lm_session_config_create();
-                if !warmup_sc.is_null() {
+                let mut warmup_sc: *mut LiteRtLmSessionConfig = ptr::null_mut();
+                if litert_lm_session_config_create(&mut warmup_sc) == STATUS_OK
+                    && !warmup_sc.is_null()
+                {
                     litert_lm_session_config_set_max_output_tokens(warmup_sc, 1);
                 }
-                let warmup_cc = litert_lm_conversation_config_create();
-                if !warmup_cc.is_null() {
+                let mut warmup_cc: *mut LiteRtLmConversationConfig = ptr::null_mut();
+                if litert_lm_conversation_config_create(&mut warmup_cc) == STATUS_OK
+                    && !warmup_cc.is_null()
+                {
                     if !warmup_sc.is_null() {
                         litert_lm_conversation_config_set_session_config(warmup_cc, warmup_sc);
                     }
-                    let t_cfg = litert_lm_thinking_config_create();
-                    if !t_cfg.is_null() {
+                    let mut t_cfg: *mut LiteRtLmThinkingConfig = ptr::null_mut();
+                    if litert_lm_thinking_config_create(&mut t_cfg) == STATUS_OK
+                        && !t_cfg.is_null()
+                    {
                         litert_lm_thinking_config_set_enable_thinking(t_cfg, false);
                         litert_lm_conversation_config_set_thinking_config(warmup_cc, t_cfg);
                         litert_lm_thinking_config_delete(t_cfg);
@@ -154,19 +227,29 @@ impl LiteRtEngine {
                 if !warmup_sc.is_null() {
                     litert_lm_session_config_delete(warmup_sc);
                 }
-                let conv = litert_lm_conversation_create(eng, warmup_cc);
+                let mut conv: *mut LiteRtLmConversation = ptr::null_mut();
+                let st = litert_lm_conversation_create(eng, warmup_cc, &mut conv);
                 if !warmup_cc.is_null() {
                     litert_lm_conversation_config_delete(warmup_cc);
                 }
-                if conv.is_null() {
+                if st != STATUS_OK || conv.is_null() {
                     return false;
                 }
-                let opt = litert_lm_conversation_optional_args_create();
-                if !opt.is_null() {
+                let mut opt: *mut LiteRtLmConversationOptionalArgs = ptr::null_mut();
+                if litert_lm_conversation_optional_args_create(&mut opt) == STATUS_OK
+                    && !opt.is_null()
+                {
                     litert_lm_conversation_optional_args_set_max_output_tokens(opt, 1);
                 }
                 let hi = CString::new(r#"{"role":"user","content":"hi"}"#).unwrap();
-                let res = litert_lm_conversation_send_message(conv, hi.as_ptr(), ptr::null(), opt);
+                let mut res: *mut LiteRtLmJsonResponse = ptr::null_mut();
+                let _ = litert_lm_conversation_send_message(
+                    conv,
+                    hi.as_ptr(),
+                    ptr::null(),
+                    opt,
+                    &mut res,
+                );
                 if !res.is_null() {
                     litert_lm_json_response_delete(res);
                 }
@@ -208,15 +291,22 @@ impl LiteRtEngine {
             run_warmup(engine_ptr);
         }
 
+        let supports_system_role = unsafe { probe_system_role_support(engine_ptr) };
         println!(
-            "[시스템] 준비 완료! (오디오 입력: {})",
-            if audio_enabled { "지원" } else { "미지원" }
+            "[시스템] 준비 완료! (오디오 입력: {}, 네이티브 system 역할: {})",
+            if audio_enabled { "지원" } else { "미지원" },
+            if supports_system_role {
+                "지원"
+            } else {
+                "미지원 -> user 앞단 병합"
+            }
         );
 
         Ok(Self {
             engine: SendEnginePtr(engine_ptr),
             max_tokens,
             audio_enabled,
+            supports_system_role,
             infer_mutex: Mutex::new(()),
             tokenizer_mutex: Mutex::new(()),
         })
@@ -238,16 +328,16 @@ impl LiteRtEngine {
             self.max_tokens as i32
         };
 
-        let sc = litert_lm_session_config_create();
-        if !sc.is_null() {
+        let mut sc: *mut LiteRtLmSessionConfig = ptr::null_mut();
+        if litert_lm_session_config_create(&mut sc) == STATUS_OK && !sc.is_null() {
             litert_lm_session_config_set_max_output_tokens(sc, max_tok);
             let s_type = if opts.temperature <= 0.001 {
                 SAMPLER_TYPE_GREEDY
             } else {
                 SAMPLER_TYPE_TOP_P
             };
-            let sp = litert_lm_sampler_params_create(s_type);
-            if !sp.is_null() {
+            let mut sp: *mut LiteRtLmSamplerParams = ptr::null_mut();
+            if litert_lm_sampler_params_create(s_type, &mut sp) == STATUS_OK && !sp.is_null() {
                 litert_lm_sampler_params_set_temperature(sp, opts.temperature);
                 litert_lm_sampler_params_set_top_p(sp, opts.top_p);
                 litert_lm_sampler_params_set_top_k(sp, opts.top_k);
@@ -259,14 +349,16 @@ impl LiteRtEngine {
             }
         }
 
-        let cc = litert_lm_conversation_config_create();
-        if !cc.is_null() {
+        let mut cc: *mut LiteRtLmConversationConfig = ptr::null_mut();
+        if litert_lm_conversation_config_create(&mut cc) == STATUS_OK && !cc.is_null() {
             if !sc.is_null() {
                 litert_lm_conversation_config_set_session_config(cc, sc);
             }
-            if !system_msg.is_empty() {
-                let sys_json = json!({ "role": "system", "content": system_msg }).to_string();
-                if let Ok(sys_c) = CString::new(sys_json) {
+            // LiteRT-LM wraps `system_message_json` as `{"role": "system", "content": <parsed>}`.
+            // Pass a JSON-encoded string so `content` is always a string (never double-wrapped).
+            if self.supports_system_role && !system_msg.is_empty() {
+                let sys_content_json = json!(system_msg).to_string();
+                if let Ok(sys_c) = CString::new(sys_content_json) {
                     litert_lm_conversation_config_set_system_message(cc, sys_c.as_ptr());
                 }
             }
@@ -276,8 +368,8 @@ impl LiteRtEngine {
                 }
             }
             litert_lm_conversation_config_set_filter_channel_content_from_kv_cache(cc, true);
-            let t_cfg = litert_lm_thinking_config_create();
-            if !t_cfg.is_null() {
+            let mut t_cfg: *mut LiteRtLmThinkingConfig = ptr::null_mut();
+            if litert_lm_thinking_config_create(&mut t_cfg) == STATUS_OK && !t_cfg.is_null() {
                 litert_lm_thinking_config_set_enable_thinking(t_cfg, false);
                 litert_lm_conversation_config_set_thinking_config(cc, t_cfg);
                 litert_lm_thinking_config_delete(t_cfg);
@@ -287,9 +379,14 @@ impl LiteRtEngine {
             litert_lm_session_config_delete(sc);
         }
 
-        let conv = litert_lm_conversation_create(self.engine.0, cc);
+        let mut conv: *mut LiteRtLmConversation = ptr::null_mut();
+        let st = litert_lm_conversation_create(self.engine.0, cc, &mut conv);
         if !cc.is_null() {
             litert_lm_conversation_config_delete(cc);
+        }
+        if st != STATUS_OK {
+            eprintln!("[오류] 대화 세션 생성 실패: {}", last_error_string());
+            return ptr::null_mut();
         }
         conv
     }
@@ -303,18 +400,31 @@ impl LiteRtEngine {
         } else {
             self.max_tokens as i32
         };
-        let opt_args = litert_lm_conversation_optional_args_create();
-        if !opt_args.is_null() {
+        let mut opt_args: *mut LiteRtLmConversationOptionalArgs = ptr::null_mut();
+        if litert_lm_conversation_optional_args_create(&mut opt_args) == STATUS_OK
+            && !opt_args.is_null()
+        {
             litert_lm_conversation_optional_args_set_max_output_tokens(opt_args, max_tok);
-            let t_cfg = litert_lm_thinking_config_create();
-            if !t_cfg.is_null() {
+            let mut t_cfg: *mut LiteRtLmThinkingConfig = ptr::null_mut();
+            if litert_lm_thinking_config_create(&mut t_cfg) == STATUS_OK && !t_cfg.is_null() {
                 litert_lm_thinking_config_set_enable_thinking(t_cfg, false);
                 litert_lm_conversation_optional_args_set_thinking_config(opt_args, t_cfg);
                 litert_lm_thinking_config_delete(t_cfg);
             }
-            if opts.frequency_penalty != 0.0 || opts.presence_penalty != 0.0 {
-                let rep = litert_lm_repetition_penalty_config_create();
-                if !rep.is_null() {
+            if opts.repetition_penalty > 1.0
+                || opts.frequency_penalty != 0.0
+                || opts.presence_penalty != 0.0
+            {
+                let mut rep: *mut LiteRtLmRepetitionPenaltyConfig = ptr::null_mut();
+                if litert_lm_repetition_penalty_config_create(&mut rep) == STATUS_OK
+                    && !rep.is_null()
+                {
+                    if opts.repetition_penalty > 1.0 {
+                        litert_lm_repetition_penalty_config_set_repetition_penalty(
+                            rep,
+                            opts.repetition_penalty,
+                        );
+                    }
                     litert_lm_repetition_penalty_config_set_presence_penalty(
                         rep,
                         opts.presence_penalty,
@@ -367,23 +477,27 @@ extern "C" fn litert_stream_trampoline(data: *mut c_void, chunk: *const LiteRtLm
     };
 
     unsafe {
-        let err_ptr = litert_lm_stream_chunk_get_error(chunk);
-        if !err_ptr.is_null() {
+        let mut err_ptr: *const libc::c_char = ptr::null();
+        if litert_lm_stream_chunk_get_error(chunk, &mut err_ptr) == STATUS_OK && !err_ptr.is_null()
+        {
             let err_str = CStr::from_ptr(err_ptr).to_string_lossy().into_owned();
             state.error = Some(err_str);
             state.done = true;
             ctx.cv.notify_one();
             return;
         }
-        let text_ptr = litert_lm_stream_chunk_get_text(chunk);
-        if !text_ptr.is_null() {
+        let mut text_ptr: *const libc::c_char = ptr::null();
+        if litert_lm_stream_chunk_get_text(chunk, &mut text_ptr) == STATUS_OK
+            && !text_ptr.is_null()
+        {
             let raw = CStr::from_ptr(text_ptr).to_string_lossy();
             let extracted = extract_text_from_chunk(&raw);
             if !extracted.is_empty() {
                 state.chunks.push_back(extracted);
             }
         }
-        if litert_lm_stream_chunk_is_final(chunk) {
+        let mut is_final = false;
+        if litert_lm_stream_chunk_is_final(chunk, &mut is_final) == STATUS_OK && is_final {
             state.done = true;
         }
     }
@@ -396,8 +510,7 @@ impl LlmEngine for LiteRtEngine {
     }
 
     fn supports_system_role(&self) -> bool {
-        // LiteRT-LM Conversation API handles system_message natively via set_system_message.
-        true
+        self.supports_system_role
     }
 
     fn count_tokens(&self, text: &str) -> usize {
@@ -412,11 +525,16 @@ impl LlmEngine for LiteRtEngine {
             return (text.len() / 3).max(1);
         };
         unsafe {
-            let res = litert_lm_engine_tokenize(self.engine.0, c_text.as_ptr());
-            if !res.is_null() {
-                let count = litert_lm_tokenize_result_get_num_tokens(res);
+            let mut res: *mut LiteRtLmTokenizeResult = ptr::null_mut();
+            if litert_lm_engine_tokenize(self.engine.0, c_text.as_ptr(), &mut res) == STATUS_OK
+                && !res.is_null()
+            {
+                let mut count: libc::size_t = 0;
+                let ok = litert_lm_tokenize_result_get_num_tokens(res, &mut count) == STATUS_OK;
                 litert_lm_tokenize_result_delete(res);
-                return count;
+                if ok {
+                    return count;
+                }
             }
         }
         (text.len() / 3).max(1)
@@ -440,26 +558,32 @@ impl LlmEngine for LiteRtEngine {
                 return String::new();
             }
             let opt_args = self.create_optional_args(opts);
-            let resp = litert_lm_conversation_send_message(
+            let mut resp: *mut LiteRtLmJsonResponse = ptr::null_mut();
+            let st = litert_lm_conversation_send_message(
                 conv,
                 msg_c.as_ptr(),
                 ptr::null(),
                 opt_args,
+                &mut resp,
             );
             if !opt_args.is_null() {
                 litert_lm_conversation_optional_args_delete(opt_args);
             }
 
             let mut text = String::new();
-            if !resp.is_null() {
-                let ptr = litert_lm_json_response_get_string(resp);
-                if !ptr.is_null() {
+            if st == STATUS_OK && !resp.is_null() {
+                let mut ptr: *const libc::c_char = ptr::null();
+                if litert_lm_json_response_get_string(resp, &mut ptr) == STATUS_OK && !ptr.is_null()
+                {
                     let raw = CStr::from_ptr(ptr).to_string_lossy();
                     text = extract_text_from_chunk(&raw);
                 }
                 litert_lm_json_response_delete(resp);
+            } else if st != STATUS_OK {
+                eprintln!("[생성 오류] {}", last_error_string());
             }
-            let kv = litert_lm_conversation_get_token_count(conv);
+            let mut kv: libc::size_t = 0;
+            let _ = litert_lm_conversation_get_token_count(conv, &mut kv);
             litert_lm_conversation_delete(conv);
             (text, kv)
         };
@@ -534,8 +658,12 @@ impl LlmEngine for LiteRtEngine {
             r
         };
 
-        if rc != 0 {
-            let _ = tx.send(StreamEvent::Error(format!("스트리밍 시작 실패 (코드: {})", rc)));
+        if rc != STATUS_OK {
+            let err = unsafe { last_error_string() };
+            let _ = tx.send(StreamEvent::Error(format!(
+                "스트리밍 시작 실패 (코드: {}): {}",
+                rc, err
+            )));
             unsafe { litert_lm_conversation_delete(conv) };
             return;
         }
@@ -614,7 +742,8 @@ impl LlmEngine for LiteRtEngine {
         }
 
         let total_kv_tokens = unsafe {
-            let kv = litert_lm_conversation_get_token_count(conv);
+            let mut kv: libc::size_t = 0;
+            let _ = litert_lm_conversation_get_token_count(conv, &mut kv);
             litert_lm_conversation_delete(conv);
             kv
         };

@@ -1,4 +1,4 @@
-use crate::config::{GenerationOptions, DEFAULT_SYSTEM_PROMPT};
+use crate::config::GenerationOptions;
 use crate::engine::embedding::EmbeddingEngine;
 use crate::engine::{LlmEngine, StreamEvent};
 use crate::parser::{ToolCallStreamParser, Utf8StreamReassembler};
@@ -119,7 +119,7 @@ fn parse_generation_options(j: &Value) -> GenerationOptions {
             opts.seed = v as i32;
         }
         if let Some(v) = o.get("repeat_penalty").and_then(Value::as_f64) {
-            opts.frequency_penalty = (v as f32) - 1.0;
+            opts.repetition_penalty = (v as f32).max(1.0);
         }
         if let Some(stop) = o.get("stop") {
             push_stop_words(stop, &mut opts.stop);
@@ -1304,7 +1304,12 @@ async fn handle_legacy_completion(
     let prompt_tokens = state.engine.count_tokens(&prompt).max(1);
     let cmpl_id = generate_random_id("cmpl-");
     let created_ts = unix_now_secs();
-    let current_msg_str = json!({"role": "user", "content": prompt}).to_string();
+    let sys_prompt = state.default_system_prompt.clone();
+    let mut current_msg_j = json!({"role": "user", "content": prompt});
+    if !sys_prompt.is_empty() && !state.engine.supports_system_role() {
+        prepend_system_prompt_to_message(&mut current_msg_j, &sys_prompt);
+    }
+    let current_msg_str = current_msg_j.to_string();
 
     if want_stream {
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<StreamEvent>();
@@ -1314,7 +1319,6 @@ async fn handle_legacy_completion(
 
         let engine_worker = state.engine.clone();
         let cancel_worker = cancelled.clone();
-        let sys_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
         tokio::task::spawn_blocking(move || {
             engine_worker.stream(
                 &sys_prompt,
@@ -1399,7 +1403,7 @@ async fn handle_legacy_completion(
 
     let engine = state.engine.clone();
     let text = tokio::task::spawn_blocking(move || {
-        engine.generate(DEFAULT_SYSTEM_PROMPT, "", &current_msg_str, &gen_opts)
+        engine.generate(&sys_prompt, "", &current_msg_str, &gen_opts)
     })
     .await
     .unwrap_or_default();

@@ -6,13 +6,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 MODEL="${1:-$REPO_ROOT/gemma-4-E4B-it.litertlm}"
 PORT="${PORT:-11434}"
-# Jetson Orin (7.4 GiB 통합 메모리) 실측 기준:
-# - 8192: 멀티모달(Vision + Audio) 병용 시 최고 안정성 (WebGPU 버퍼 오류 0건)
-# - 10240: 텍스트 위주 최대 권장치 (12288 이상은 WebGPU Invalid Buffer / 스왑 스래싱 발생)
-MAX_TOKENS="${MAX_TOKENS:-8192}"
+# Jetson Orin (7.4 GiB 통합 메모리) + LiteRT-LM 0.19.2 / ai-edge-litert 2.4.0 실측 기준:
+# - 4096: WebGPU 긴 컨텍스트(2.5K~3K+ 멀티턴 입력)에서 한국어 맞춤법/품질 100% 정상 + MTP 가속 안정
+# - 6144~8192 이상: WebGPU KV 캐시 리사이징 구간에서 긴 입력(2.5K~3K+) 시 음절 중복/맞춤법 붕괴 발생
+MAX_TOKENS="${MAX_TOKENS:-4096}"
 MODEL_NAME="${MODEL_NAME:-gemma4-e4b:latest}"
 ENABLE_MTP="${ENABLE_MTP:-1}"
-# E4B(3.5GB) + Vision + Audio + 8K KV 캐시 여유 메모리 확보를 위해 기본 비활성화 (필요 시 ENABLE_EMBEDDING=1)
+# E4B(3.5GB) + Vision + Audio + KV 캐시 여유 메모리 확보를 위해 기본 비활성화 (필요 시 ENABLE_EMBEDDING=1)
 ENABLE_EMBEDDING="${ENABLE_EMBEDDING:-0}"
 
 if [ ! -f "$MODEL" ]; then
@@ -20,9 +20,9 @@ if [ ! -f "$MODEL" ]; then
     exit 1
 fi
 
-if [ "$MAX_TOKENS" -gt 10240 ] 2>/dev/null; then
-    echo "⚠️  [경고] MAX_TOKENS=${MAX_TOKENS}는 Gemma 4 E4B 권장 상한(10240)을 초과합니다."
-    echo "    7.4 GiB 환경에서는 WebGPU Invalid Buffer 오류 및 스왑 스래싱이 발생할 수 있습니다."
+if [ "$MAX_TOKENS" -gt 4096 ] 2>/dev/null; then
+    echo "⚠️  [경고] MAX_TOKENS=${MAX_TOKENS}는 WebGPU 한국어 품질 안정 상한(4096)을 초과합니다."
+    echo "    6144~8192 이상에서는 긴 컨텍스트 입력 시 음절 중복 및 맞춤법 붕괴가 발생할 수 있습니다."
 fi
 
 # 포트 충돌 사전 감지
