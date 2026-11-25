@@ -1,17 +1,23 @@
-# Model and Cache files
+# Model, Cache, and Download files
 *.litertlm
 *.gguf
 *.bin
 *.xnnpack_cache*
 *_cache*
+*.crdownload
+*.part
+
+# Local third-party toolchains & builds (CUDA, Vulkan SDK, llama.cpp)
+/third_party/
 
 # Python
 __pycache__/
 *.pyc
 
-# Bazel
+# Bazel & CMake
 bazel-*
 /build/
+/build-*/
 
 # OS
 .DS_Store

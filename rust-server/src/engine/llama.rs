@@ -19,28 +19,44 @@ pub struct LlamaEngine {
 }
 
 impl LlamaEngine {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         model_path: &str,
+        draft_model_path: Option<&str>,
+        device: Option<&str>,
         max_tokens: usize,
         use_gpu: bool,
         n_gpu_layers: i32,
         enable_mtp: bool,
+        cpu_moe: bool,
+        op_offload: bool,
+        n_threads: i32,
     ) -> Result<Self> {
         println!(
-            "[llama.cpp] GGUF 모델 로딩 중: {} (GPU: {}, MTP: {}, Max Tokens: {})...",
+            "[llama.cpp] GGUF 모델 로딩 중: {} (GPU: {}, Device: {}, Draft: {}, MTP: {}, CPU-MoE: {}, Max Tokens: {})...",
             model_path,
             if use_gpu { "ON" } else { "OFF" },
+            device.unwrap_or("auto"),
+            draft_model_path.unwrap_or("none"),
             if enable_mtp { "ON" } else { "OFF" },
+            if cpu_moe { "ON" } else { "OFF" },
             max_tokens
         );
         let path_c = CString::new(model_path)?;
+        let draft_c = CString::new(draft_model_path.unwrap_or(""))?;
+        let dev_c = CString::new(device.unwrap_or(""))?;
         let ptr = unsafe {
             llama_shim_create(
                 path_c.as_ptr(),
+                draft_c.as_ptr(),
+                dev_c.as_ptr(),
                 max_tokens as i32,
                 use_gpu,
                 n_gpu_layers,
                 enable_mtp,
+                cpu_moe,
+                op_offload,
+                n_threads,
             )
         };
         if ptr.is_null() {

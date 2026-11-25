@@ -28,10 +28,15 @@ pub type LlamaIsCancelledCallback = extern "C" fn(*mut c_void) -> bool;
 extern "C" {
     pub fn llama_shim_create(
         model_path: *const c_char,
+        draft_model_path: *const c_char,
+        device: *const c_char,
         max_tokens: c_int,
         use_gpu: bool,
         n_gpu_layers: c_int,
         enable_mtp: bool,
+        cpu_moe: bool,
+        op_offload: bool,
+        n_threads: c_int,
     ) -> *mut LlamaShimEngine;
 
     pub fn llama_shim_destroy(eng: *mut LlamaShimEngine);

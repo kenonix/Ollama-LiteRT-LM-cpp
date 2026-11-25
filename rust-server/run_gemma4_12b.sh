@@ -4,10 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-DEFAULT_MODEL="$REPO_ROOT/gemma-4-12B-it.litertlm"
+if [ -f "$REPO_ROOT/gemma-4-12B-it-gpu.litertlm" ]; then
+    DEFAULT_MODEL="$REPO_ROOT/gemma-4-12B-it-gpu.litertlm"
+else
+    DEFAULT_MODEL="$REPO_ROOT/gemma-4-12B-it.litertlm"
+fi
 RADEON_ICD="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
 
-MODEL="$DEFAULT_MODEL"
+MODEL=""
 PORT="${PORT:-11434}"
 # 노트북(Ryzen 9 5900HS / RAM 46 GiB / RTX 3060 6GB + Radeon iGPU) 실측 기준:
 # - NVIDIA RTX 3060 (VRAM 6GB): 가중치 로드 시 VK_ERROR_OUT_OF_DEVICE_MEMORY (실행 불가)
@@ -133,11 +137,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ ! -f "$MODEL" ]; then
-    echo "❌ [오류] 모델 파일을 찾을 수 없습니다: $MODEL"
-    exit 1
-fi
-
 # 백엔드 검증 및 폴백
 BACKEND_DESC=""
 USE_GPU=0
@@ -167,6 +166,19 @@ case "$BACKEND" in
         exit 1
         ;;
 esac
+
+if [ -z "$MODEL" ]; then
+    if [ "$USE_GPU" = "1" ] && [ -f "$REPO_ROOT/gemma-4-12B-it-gpu.litertlm" ]; then
+        MODEL="$REPO_ROOT/gemma-4-12B-it-gpu.litertlm"
+    else
+        MODEL="$REPO_ROOT/gemma-4-12B-it.litertlm"
+    fi
+fi
+
+if [ ! -f "$MODEL" ]; then
+    echo "❌ [오류] 모델 파일을 찾을 수 없습니다: $MODEL"
+    exit 1
+fi
 
 # 포트 충돌 사전 감지
 if ss -tulpn 2>/dev/null | grep -q ":${PORT}[[:space:]]"; then

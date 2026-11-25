@@ -20,12 +20,14 @@ extern "C" {
 
 struct LlamaShimEngine {
   llama_model *model = nullptr;
+  llama_model *model_dft = nullptr;
   const llama_vocab *vocab = nullptr;
   llama_context *ctx = nullptr;
   llama_context *ctx_dft = nullptr;
   common_speculative *spec = nullptr;
   int max_tokens = 2048;
-  bool enable_mtp = false;
+  bool enable_spec = false;
+  bool is_dflash = false;
   std::mutex infer_mutex;
 };
 
@@ -154,20 +156,49 @@ static std::string format_chat_prompt(llama_model *model,
 }
 
 LlamaShimEngine *llama_shim_create(const char *model_path,
+                                   const char *draft_model_path,
+                                   const char *device,
                                    int max_tokens,
                                    bool use_gpu,
                                    int n_gpu_layers,
-                                   bool enable_mtp) {
+                                   bool enable_mtp,
+                                   bool cpu_moe,
+                                   bool op_offload,
+                                   int n_threads) {
   if (!model_path) return nullptr;
   ggml_backend_load_all();
 
   auto *eng = new LlamaShimEngine();
   eng->max_tokens = max_tokens;
-  eng->enable_mtp = enable_mtp;
+  const bool has_draft_file = (draft_model_path && draft_model_path[0] != '\0');
+  eng->is_dflash = has_draft_file;
+  eng->enable_spec = enable_mtp || has_draft_file;
+
+  ggml_backend_dev_t dev_list[2] = { nullptr, nullptr };
+  if (device && device[0] != '\0') {
+    ggml_backend_dev_t dev = ggml_backend_dev_by_name(device);
+    if (dev) {
+      dev_list[0] = dev;
+    } else {
+      std::cerr << "[llama.cpp] 경고: 디바이스 '" << device << "'를 찾을 수 없어 기본 디바이스를 사용합니다." << std::endl;
+    }
+  }
+
+  std::vector<llama_model_tensor_buft_override> buft_overrides;
+  if (cpu_moe) {
+    buft_overrides.push_back(llm_ffn_exps_cpu_override());
+    buft_overrides.push_back({ nullptr, nullptr });
+  }
 
   llama_model_params mparams = llama_model_default_params();
   mparams.n_gpu_layers = use_gpu ? n_gpu_layers : 0;
-  mparams.load_mtp = enable_mtp;
+  mparams.load_mtp = enable_mtp && !has_draft_file;
+  if (dev_list[0] != nullptr) {
+    mparams.devices = dev_list;
+  }
+  if (!buft_overrides.empty()) {
+    mparams.tensor_buft_overrides = buft_overrides.data();
+  }
 
   eng->model = llama_model_load_from_file(model_path, mparams);
   if (!eng->model) {
@@ -176,14 +207,21 @@ LlamaShimEngine *llama_shim_create(const char *model_path,
   }
   eng->vocab = llama_model_get_vocab(eng->model);
 
+  const int n_draft_max = has_draft_file ? 7 : 2;
   llama_context_params cparams = llama_context_default_params();
   cparams.n_ctx = max_tokens;
   cparams.n_batch = 512;
   cparams.n_ubatch = 256;
   cparams.no_perf = true;
-  if (enable_mtp) {
-    cparams.n_rs_seq = 2;
-    auto out_limits = common_speculative_get_output_limits(cparams.n_batch, 1, 2);
+  cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+  cparams.op_offload = op_offload;
+  if (n_threads > 0) {
+    cparams.n_threads = n_threads;
+    cparams.n_threads_batch = n_threads;
+  }
+  if (eng->enable_spec) {
+    cparams.n_rs_seq = n_draft_max;
+    auto out_limits = common_speculative_get_output_limits(cparams.n_batch, 1, n_draft_max);
     cparams.n_outputs_max = out_limits.total;
     cparams.n_outputs_max_per_seq = out_limits.per_seq;
   }
@@ -195,7 +233,53 @@ LlamaShimEngine *llama_shim_create(const char *model_path,
     return nullptr;
   }
 
-  if (enable_mtp && llama_model_n_layer_nextn(eng->model) > 0) {
+  if (has_draft_file) {
+    llama_model_params mparams_dft = llama_model_default_params();
+    mparams_dft.n_gpu_layers = use_gpu ? n_gpu_layers : 0;
+    if (dev_list[0] != nullptr) {
+      mparams_dft.devices = dev_list;
+    }
+    eng->model_dft = llama_model_load_from_file(draft_model_path, mparams_dft);
+    if (eng->model_dft) {
+      llama_context_params cparams_dft = cparams;
+      cparams_dft.n_rs_seq = 0;
+      cparams_dft.ctx_other = eng->ctx;
+      cparams_dft.n_outputs_max = n_draft_max + 1;
+      cparams_dft.n_outputs_max_per_seq = n_draft_max + 1;
+      eng->ctx_dft = llama_init_from_model(eng->model_dft, cparams_dft);
+      if (eng->ctx_dft) {
+        common_params_speculative spec_params;
+        spec_params.types = { COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH };
+        spec_params.draft.ctx_tgt = eng->ctx;
+        spec_params.draft.ctx_dft = eng->ctx_dft;
+        spec_params.draft.n_max = n_draft_max;
+        spec_params.draft.n_min = 0;
+        spec_params.draft.p_min = 0.0f;
+        spec_params.draft.probabilistic = true;
+        eng->spec = common_speculative_init(spec_params, 1);
+        if (eng->spec) {
+          std::cout << "[llama.cpp] DFlash2 투기적 디코딩 활성화 완료: " << draft_model_path << std::endl;
+        } else {
+          std::cerr << "[llama.cpp] 경고: DFlash2 초기화 실패 -> 일반 디코딩으로 전환합니다." << std::endl;
+          llama_free(eng->ctx_dft);
+          eng->ctx_dft = nullptr;
+          llama_model_free(eng->model_dft);
+          eng->model_dft = nullptr;
+          eng->enable_spec = false;
+          eng->is_dflash = false;
+        }
+      } else {
+        llama_model_free(eng->model_dft);
+        eng->model_dft = nullptr;
+        eng->enable_spec = false;
+        eng->is_dflash = false;
+      }
+    } else {
+      std::cerr << "[llama.cpp] 경고: DFlash 드래프트 모델 로드 실패: " << draft_model_path << std::endl;
+      eng->enable_spec = false;
+      eng->is_dflash = false;
+    }
+  } else if (enable_mtp && llama_model_n_layer_nextn(eng->model) > 0) {
     llama_context_params cparams_dft = cparams;
     cparams_dft.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
     cparams_dft.n_rs_seq = 0;
@@ -215,13 +299,13 @@ LlamaShimEngine *llama_shim_create(const char *model_path,
       if (!eng->spec) {
         llama_free(eng->ctx_dft);
         eng->ctx_dft = nullptr;
-        eng->enable_mtp = false;
+        eng->enable_spec = false;
       }
     } else {
-      eng->enable_mtp = false;
+      eng->enable_spec = false;
     }
   } else {
-    eng->enable_mtp = false;
+    eng->enable_spec = false;
   }
 
   return eng;
@@ -232,6 +316,7 @@ void llama_shim_destroy(LlamaShimEngine *eng) {
   std::lock_guard<std::mutex> lock(eng->infer_mutex);
   if (eng->spec) common_speculative_free(eng->spec);
   if (eng->ctx_dft) llama_free(eng->ctx_dft);
+  if (eng->model_dft) llama_model_free(eng->model_dft);
   if (eng->ctx) llama_free(eng->ctx);
   if (eng->model) llama_model_free(eng->model);
   delete eng;
@@ -376,7 +461,7 @@ void llama_shim_stream(LlamaShimEngine *eng,
     }
   };
 
-  if (eng->enable_mtp && eng->ctx_dft && eng->spec && !prompt_tokens.empty()) {
+  if (eng->enable_spec && eng->ctx_dft && eng->spec && !prompt_tokens.empty()) {
     common_params_sampling sp;
     sp.temp = temp;
     sp.top_k = top_k;
@@ -404,7 +489,7 @@ void llama_shim_stream(LlamaShimEngine *eng,
       if (llama_process(eng->ctx, LLAMA_PROCESS_TYPE_DECODE, batch_prompt.get()) != 0 ||
           !common_speculative_process(eng->spec, batch_prompt)) {
         lock.unlock();
-        if (error_cb) error_cb(user_data, "llama MTP prefill 실패");
+        if (error_cb) error_cb(user_data, "llama speculative prefill 실패");
         return;
       }
     }
@@ -417,6 +502,7 @@ void llama_shim_stream(LlamaShimEngine *eng,
     common_speculative_begin(eng->spec, seq_id, prompt_tgt);
     common_batch batch_tgt(eng->ctx);
     llama_tokens draft;
+    std::vector<std::vector<llama_token_data>> draft_q;
     int n_predict = 0;
     bool has_eos = false;
 
@@ -424,20 +510,30 @@ void llama_shim_stream(LlamaShimEngine *eng,
       if (is_cancelled && is_cancelled(user_data)) break;
 
       if (draft.empty()) {
+        draft_q.clear();
         int n_draft_max = std::max(0, std::min(eng->max_tokens - n_past - 2, max_gen - n_predict - 1));
         if (n_draft_max > 0) {
-          common_speculative_get_draft_params(eng->spec, seq_id) = {
-              true, n_draft_max, n_past, id_last, &prompt_tgt, &draft
-          };
+          auto & dp = common_speculative_get_draft_params(eng->spec, seq_id);
+          dp.drafting = true;
+          dp.n_max = n_draft_max;
+          dp.pos0 = n_past;
+          dp.id_last = id_last;
+          dp.prompt = &prompt_tgt;
+          dp.result = &draft;
+          dp.result_q = eng->is_dflash ? &draft_q : nullptr;
+          dp.temp = temp;
+          dp.seed = sp.seed;
           common_speculative_draft(eng->spec);
           llama_memory_seq_rm(llama_get_memory(eng->ctx_dft), seq_id, n_past, -1);
         }
       }
 
       batch_tgt.clear();
-      batch_tgt.add(id_last, n_past++, seq_id, true);
+      std::vector<int> i_batch;
+      i_batch.reserve(1 + draft.size());
+      i_batch.push_back(batch_tgt.add(id_last, n_past++, seq_id, true));
       for (size_t i = 0; i < draft.size(); ++i) {
-        batch_tgt.add(draft[i], n_past + static_cast<int>(i), seq_id, true);
+        i_batch.push_back(batch_tgt.add(draft[i], n_past + static_cast<int>(i), seq_id, true));
       }
 
       if (llama_process(eng->ctx, LLAMA_PROCESS_TYPE_DECODE, batch_tgt.get()) != 0 ||
@@ -445,7 +541,12 @@ void llama_shim_stream(LlamaShimEngine *eng,
         break;
       }
 
-      auto ids = common_sampler_sample_and_accept_n(smpl.get(), eng->ctx, draft);
+      std::vector<llama_token> ids;
+      if (!draft_q.empty() && draft_q.size() == draft.size()) {
+        ids = common_sampler_sample_and_accept_n_rejection(smpl.get(), eng->ctx, i_batch, draft, draft_q);
+      } else {
+        ids = common_sampler_sample_and_accept_n(smpl.get(), eng->ctx, i_batch, draft);
+      }
       if (ids.empty()) break;
 
       common_speculative_accept(eng->spec, seq_id, ids.size() - 1);
@@ -468,6 +569,7 @@ void llama_shim_stream(LlamaShimEngine *eng,
       }
 
       draft.clear();
+      draft_q.clear();
       llama_memory_seq_rm(llama_get_memory(eng->ctx), seq_id, n_past, -1);
       llama_memory_seq_rm(llama_get_memory(eng->ctx_dft), seq_id, n_past, -1);
     }

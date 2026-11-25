@@ -62,6 +62,26 @@ struct Cli {
     /// Disable embedding engine
     #[arg(long, default_value_t = false)]
     no_embedding: bool,
+
+    /// External DFlash / speculative draft GGUF model path
+    #[arg(long, alias = "dflash-model")]
+    draft_model: Option<String>,
+
+    /// Explicit ggml backend device name (e.g. CUDA0, Vulkan0)
+    #[arg(long)]
+    device: Option<String>,
+
+    /// Keep MoE routed expert weights on CPU (saves VRAM on 6GB GPUs)
+    #[arg(long, default_value_t = false)]
+    cpu_moe: bool,
+
+    /// Disable offloading host tensor ops to GPU device
+    #[arg(long, default_value_t = false)]
+    no_op_offload: bool,
+
+    /// Number of CPU threads for llama.cpp
+    #[arg(long, default_value_t = 8)]
+    threads: i32,
 }
 
 #[tokio::main]
@@ -78,8 +98,13 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
 
     let model_path = cli.model_path.clone();
+    let draft_model_path = cli.draft_model.clone();
+    let device = cli.device.clone();
     let use_gpu = cli.gpu;
     let enable_mtp = cli.mtp;
+    let cpu_moe = cli.cpu_moe;
+    let op_offload = !cli.no_op_offload;
+    let n_threads = cli.threads;
     let engine_factory: EngineFactory = Arc::new(move |max_tokens: usize| -> Result<Arc<dyn LlmEngine>> {
         let is_gguf = model_path.ends_with(".gguf");
         if is_gguf {
@@ -88,10 +113,15 @@ async fn main() -> Result<()> {
                 println!("[시스템] GGUF 모델 감지 -> llama.cpp 엔진 백엔드 활성화 (Max Tokens: {})", max_tokens);
                 Ok(Arc::new(LlamaEngine::new(
                     &model_path,
+                    draft_model_path.as_deref(),
+                    device.as_deref(),
                     max_tokens,
                     use_gpu,
                     99,
                     enable_mtp,
+                    cpu_moe,
+                    op_offload,
+                    n_threads,
                 )?))
             }
             #[cfg(not(has_llama_cpp))]
